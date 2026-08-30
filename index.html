@@ -79,15 +79,7 @@ label{display:block;font-size:14px;margin-bottom:8px}
 .bar .val{min-width:46px;text-align:right}
 .kbd{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;background:#f9fafb}
 @media(max-width:600px){main{padding:10px}th,td{padding:6px;font-size:13px}h1{font-size:19px}}
-</style>
-<meta name="theme-color" content="#111827">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="QCM Médecine">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="manifest" href="manifest.webmanifest">
-</head><body>
+</style></head><body>
 <header><b>🩺 QCM Médecine <span class="small" style="color:#9ca3af">v15</span></b>
 <nav>
 <button data-nav="home" onclick="show('home')">Accueil</button>
@@ -770,7 +762,16 @@ function renderReview(){
  const counts={late:split.late.length,today:split.today.length,new:split.new.length};
  const years=[...new Set(db.records.filter(isValidated).map(yearOf))].sort();
  const ues=[...new Set(db.records.filter(isValidated).map(ueOf))].sort();
- const annales=[...new Set(db.records.filter(isValidated).map(q=>q.source).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),'fr'));
+ const anneeParAnnale={};
+ for(const q of db.records.filter(isValidated)){
+   const src=q.source;if(!src)continue;
+   const y=parseInt(String(yearOf(q)||'').slice(0,4))||0;
+   if(anneeParAnnale[src]===undefined||y>anneeParAnnale[src])anneeParAnnale[src]=y;
+ }
+ const annales=[...new Set(db.records.filter(isValidated).map(q=>q.source).filter(Boolean))].sort((a,b)=>{
+   const d=(anneeParAnnale[b]||0)-(anneeParAnnale[a]||0);
+   return d!==0?d:String(a).localeCompare(String(b),'fr');
+ });
  area.innerHTML=`<div class="card"><h3>Nouvelle session</h3>
  <div class="editgrid">
   <label>Contenu
@@ -781,13 +782,13 @@ function renderReview(){
     <option value="recurrent">⭐ QCM récurrents (${pools.recurrent.length})</option>
    </select></label>${pools.failed.length?`<button class="secondary" onclick="resetBetesNoires()" title="Remet à zéro le compteur d'échecs de tous les QCM">🧹 Réinitialiser mes bêtes noires (${pools.failed.length})</button>`:''}
   <label>UE
-   <select id="sessUE" style="width:100%"><option value="all">Toutes</option>${ues.map(u=>`<option>${esc(u)}</option>`).join('')}</select></label>
+   <select id="sessUE" style="width:100%" onchange="refreshSessionFilters()"><option value="all">Toutes</option>${ues.map(u=>`<option>${esc(u)}</option>`).join('')}</select></label>
   <label>Année
-   <select id="sessYear" style="width:100%"><option value="all">Toutes</option>${years.map(y=>`<option>${esc(y)}</option>`).join('')}</select></label>
+   <select id="sessYear" style="width:100%" onchange="refreshSessionFilters()"><option value="all">Toutes</option>${years.map(y=>`<option>${esc(y)}</option>`).join('')}</select></label>
   <label>Annale
    <select id="sessAnnale" style="width:100%"><option value="all">Toutes</option>${annales.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select></label>
   <label>Longueur
-   <select id="sessLen" style="width:100%"><option value="10">10 QCM</option><option value="20" selected>20 QCM</option><option value="50">50 QCM</option><option value="0">Tout</option></select></label>
+   <select id="sessLen" style="width:100%"><option value="10">10 QCM</option><option value="20">20 QCM</option><option value="50">50 QCM</option><option value="0" selected>Tout</option></select></label>
  </div>
  <div class="editgrid">
   <label>Ordre de passage
@@ -802,6 +803,40 @@ function renderReview(){
  `+renderExamSetup()+`
  ${pools.due.length?'':'<div class="card small">Aucun QCM n\'est dû aujourd\'hui. Vous pouvez lancer une session libre sur « Toute la banque validée » : les réponses données reprogrammeront normalement les QCM travaillés.</div>'}`;
 }
+/* Filtrage en cascade des menus de session : l'UE restreint les années et les
+   annales proposées ; l'année (dans l'UE) restreint les annales. On préserve la
+   sélection courante si elle reste valide, sinon on repasse sur « Toutes ». */
+function refreshSessionFilters(){
+ const ueSel=document.getElementById('sessUE'),yearSel=document.getElementById('sessYear'),annaleSel=document.getElementById('sessAnnale');
+ if(!ueSel||!yearSel||!annaleSel)return;
+ const ue=ueSel.value,base=db.records.filter(isValidated);
+ // Années disponibles dans l'UE choisie.
+ const parUE=base.filter(q=>ue==='all'||ueOf(q)===ue);
+ const years=[...new Set(parUE.map(yearOf))].sort();
+ const yearVoulu=yearSel.value;
+ const yearOk=yearVoulu==='all'||years.includes(yearVoulu);
+ yearSel.innerHTML=`<option value="all">Toutes</option>`+years.map(y=>`<option${(yearOk&&y===yearVoulu)?' selected':''}>${esc(y)}</option>`).join('');
+ if(!yearOk)yearSel.value='all';
+ const year=yearSel.value;
+ // Annales disponibles dans l'UE + année choisies, triées par année décroissante
+ // (plus récentes d'abord), le nom départageant à année égale.
+ const parUEYear=parUE.filter(q=>year==='all'||yearOf(q)===year);
+ const anneeAnnale={};
+ for(const q of parUEYear){
+   const src=q.source;if(!src)continue;
+   const y=parseInt(String(yearOf(q)||'').slice(0,4))||0;
+   if(anneeAnnale[src]===undefined||y>anneeAnnale[src])anneeAnnale[src]=y;
+ }
+ const annales=[...new Set(parUEYear.map(q=>q.source).filter(Boolean))].sort((a,b)=>{
+   const d=(anneeAnnale[b]||0)-(anneeAnnale[a]||0);
+   return d!==0?d:String(a).localeCompare(String(b),'fr');
+ });
+ const annaleVoulu=annaleSel.value;
+ const annaleOk=annaleVoulu==='all'||annales.includes(annaleVoulu);
+ annaleSel.innerHTML=`<option value="all">Toutes</option>`+annales.map(s=>`<option value="${esc(s)}"${(annaleOk&&s===annaleVoulu)?' selected':''}>${esc(s)}</option>`).join('');
+ if(!annaleOk)annaleSel.value='all';
+}
+
 function startSession(){
  const mode=document.getElementById('sessMode')?.value||'due';
  const ue=document.getElementById('sessUE')?.value||'all';
@@ -1153,6 +1188,9 @@ async function restoreBackup(file){
      else if(obj.t==='annexeImg'){await saveAnnexeImage(obj.k,obj.v);imgN++}
      else if(obj.t==='pdf'){await savePdfSource(obj.k,obj.v);pdfN++}
      if((imgN+pdfN)%25===0&&info)info.innerHTML=`<span class="badge">Restauration…</span> ${imgN} image(s), ${pdfN} PDF traités.`;
+     // Point de reprise : on persiste régulièrement pour ne pas tout reperdre si
+     // l'opération s'interrompt sur un très gros fichier.
+     if((imgN+pdfN)%200===0){try{save()}catch(_){}}
    };
 
    const appliqueEntete=(h)=>{
@@ -1182,6 +1220,10 @@ async function restoreBackup(file){
        }
        if(typeof persistExams==='function')persistExams();
      }
+     // IMPORTANT : on enregistre les QCM TOUT DE SUITE, avant de traiter les
+     // images (qui peuvent être très volumineuses). Ainsi, même si le traitement
+     // des images s'interrompt, la banque de QCM est déjà persistée.
+     save();
    };
 
    // Tentative en flux (format NDJSON). La 1re ligne est l'en-tête ; les suivantes
@@ -1223,7 +1265,11 @@ async function restoreBackup(file){
    save();initFilters();
    if(info)info.innerHTML=`<span class="badge b-ok">Restauration effectuée</span> ${added} ajouté(s), ${updated} mis à jour · ${imgN} image(s), ${pdfN} PDF. Banque : ${db.records.length} QCM.`;
  }catch(e){
-   if(info)info.innerHTML=`<span class="badge b-danger">Échec</span> ${esc(e.message)}`;
+   // Les QCM ont déjà été enregistrés dans appliqueEntete(). Si l'erreur survient
+   // pendant les images, la banque de QCM est donc sauvée — on le dit clairement.
+   try{save()}catch(_){}
+   initFilters();
+   if(info)info.innerHTML=`<span class="badge b-danger">Interrompu</span> ${esc(e.message||String(e))}. Les ${db.records.length} QCM sont enregistrés ; certaines images ont pu ne pas être restaurées. Vous pouvez relancer la restauration : elle complètera les images manquantes.`;
  }
 }
 function renderStorageInfo(){
@@ -4836,13 +4882,5 @@ async function boot(){
 }
 if(typeof document!=='undefined'&&document.getElementById('bankBody'))boot();
 
-</script>
-
-<script>
-if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
-  window.addEventListener("load", function(){
-    navigator.serviceWorker.register("./sw.js").catch(function(){});
-  });
-}
 </script>
 </body></html>
