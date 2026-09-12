@@ -923,7 +923,7 @@ function renderCard(){
   <h2 style="margin:10px 0;white-space:pre-wrap">${esc(q.question)}</h2>
   ${figureImage(q)?renderFigure(q):(img?`<img class="sourceimg" src="${img}" alt="page source">`:'')}
   ${letters.map(l=>`<div class="${cls(l)}" onclick="toggleChoice('${l}')"><span class="k">${mark(l)} ${l}.</span><span>${esc(q.choices?.[l]||'—')}</span></div>`).join('')}
-  ${session.revealed?recurrenceDetail(q)+renderExplanation(q,true):`<button class="primary" style="margin-top:10px" onclick="reveal()">Valider ma réponse</button> <span class="small">Sélection : ${[...session.sel].sort().join('')||'aucune'}</span>`}
+  ${session.revealed?recurrenceDetail(q)+renderExplanation(q,true):`<button class="primary" style="margin-top:10px" onclick="reveal()">Valider ma réponse</button> <button class="secondary" style="margin-top:10px" onclick="skipCard()">Passer ▶</button> <span class="small">Sélection : ${[...session.sel].sort().join('')||'aucune'}</span>`}
   ${feedback}
  </div>`;
 }
@@ -931,6 +931,14 @@ function reveal(){
  if(!session||session.revealed)return;
  if(!session.sel.size&&!confirm('Aucune proposition cochée. Valider quand même ?'))return;
  session.revealed=true;renderCard();
+}
+/* Passe le QCM sans y répondre : on avance sans le noter ni modifier sa
+   planification (il réapparaîtra normalement selon son échéance habituelle).
+   Il est simplement sauté pour cette session. */
+function skipCard(){
+ if(!session)return;
+ session.idx++;session.sel=new Set();session.revealed=false;
+ if(session.idx>=session.queue.length)renderSessionEnd();else renderCard();
 }
 function grade(quality){
  if(!session||!session.revealed)return;
