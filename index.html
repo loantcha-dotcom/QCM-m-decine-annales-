@@ -1083,6 +1083,72 @@ function download(name,content,type){
    }
  }
 }
+/* Wrapper appelé depuis le catalogue par UE : l'index évite de passer un nom de
+   fichier brut (avec apostrophes éventuelles) dans un attribut onclick. */
+function exportAnnaleParIndex(idx){
+ const a=(window.__annalesUE||[])[idx];
+ if(!a){alert('Annale introuvable.');return}
+ exportAnnale(a.source,true,true);
+}
+
+async function exportAnnale(source,withAssets,withPdf){
+ const stamp=new Date().toISOString().slice(0,10);
+ const slug=String(source||'annale').replace(/\.pdf$/i,'').replace(/[^a-z0-9]+/gi,'-').replace(/^-+|-+$/g,'').slice(0,60)||'annale';
+ const parts=[];
+ const info=document.getElementById('restoreInfo')||document.getElementById('storageInfo');
+ try{
+   const recs=db.records.filter(q=>q.source===source);
+   if(!recs.length){if(info)info.innerHTML=`<span class="badge b-danger">Aucun QCM</span> pour cette annale.`;return}
+   const ids=new Set(recs.map(q=>q.id));
+   const progFiltre={};for(const id of ids)if(progress[id])progFiltre[id]=progress[id];
+   const examsFiltre=(typeof exams!=='undefined'?exams:[]).filter(e=>e.source===source);
+   const annexesFiltre=(db.annexes||[]).filter(a=>a.source===source);
+
+   const header={app:'qcm-medecine',version:16,format:'ndjson-1',exportedAt:new Date().toISOString(),
+     withAssets:!!withAssets,withPdfs:!!withPdf,annale:source,
+     records:recs,progress:progFiltre,exams:examsFiltre,annexes:annexesFiltre};
+   parts.push(JSON.stringify(header)+'\n');
+
+   if(withAssets){
+     const pages=RUNTIME_PAGE_ASSETS[source];
+     if(pages&&Object.keys(pages).length)parts.push(JSON.stringify({t:'page',k:source,v:pages})+'\n');
+     const pushMap=(type,map)=>{
+       for(const id of ids){
+         const v=map[id];if(v==null)continue;
+         const val=Array.isArray(v)?v:String(v);
+         try{parts.push(JSON.stringify({t:type,k:id,v:val})+'\n')}catch(e){}
+       }
+     };
+     pushMap('explain',RUNTIME_EXPLAIN);
+     pushMap('figure',RUNTIME_FIGURE);
+     for(const a of annexesFiltre){
+       const v=RUNTIME_ANNEXE[a.id];if(v==null)continue;
+       try{parts.push(JSON.stringify({t:'annexeImg',k:a.id,v:String(v)})+'\n')}catch(e){}
+     }
+   }
+   let pdfOk=0;
+   if(withPdf){
+     const blob=RUNTIME_PDFS[source];
+     if(blob){
+       try{
+         let b=blob;const utilisable=x=>x&&typeof x.arrayBuffer==='function';
+         if(!utilisable(b)){
+           if(b&&b.data)b=new Blob([b.data],{type:'application/pdf'});
+           else if(typeof b==='string')b=new Blob([b64Bytes(b)],{type:'application/pdf'});
+           else{const alt=await pdfBlobFor(source);if(utilisable(alt))b=alt}
+         }
+         if(utilisable(b)){parts.push(JSON.stringify({t:'pdf',k:source,v:await blobToBase64(b)})+'\n');pdfOk++}
+       }catch(e){console.warn('PDF non exporté',source,e)}
+     }
+   }
+   downloadParts(`qcm-medecine-${slug}-${stamp}.json`,parts);
+   if(info)info.innerHTML=`<span class="badge b-ok">Annale exportée</span> ${esc(source)} · ${recs.length} QCM${withPdf?` · ${pdfOk} PDF inclus`:''}.`;
+ }catch(e){
+   if(info)info.innerHTML=`<span class="badge b-danger">Échec de l'export</span> ${esc(e&&e.message||String(e))}`;
+   else alert("L'export a échoué : "+(e&&e.message||e));
+ }
+}
+
 async function exportBackup(withAssets,withPdfs){
  // Assemblage EN MORCEAUX : chaque partie est une ligne JSON indépendante, et le
  // fichier est construit directement à partir d'un tableau de chaînes. On ne crée
@@ -2827,6 +2893,7 @@ function renderAnnalesByUE(){
          <b style="flex:1">${esc(a.source)}</b>
          <span class="badge b-info">${esc(annee)}</span>
          <span class="badge">${a.n} QCM</span>
+         <button class="secondary" style="padding:2px 8px;font-size:.85em" onclick="event.stopPropagation();exportAnnaleParIndex(${idx})" title="Exporter uniquement cette annale (QCM, images, PDF sujet)">📤 Exporter</button>
        </div>${detail}</div>`;
    }).join('');
    return `<div class="card"><h3>${esc(ue)} <span class="small">— ${annales.length} annale(s), ${totalQ} QCM</span></h3>${lignes}</div>`;
