@@ -80,9 +80,10 @@ label{display:block;font-size:14px;margin-bottom:8px}
 .kbd{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;background:#f9fafb}
 @media(max-width:600px){main{padding:10px}th,td{padding:6px;font-size:13px}h1{font-size:19px}}
 </style></head><body>
-<header><b>🩺 QCM Médecine <span class="small" style="color:#9ca3af">v15</span></b>
+<header><b>🩺 QCM Médecine <span class="small" style="color:#9ca3af">v18</span></b>
 <nav>
 <button data-nav="home" onclick="show('home')">Accueil</button>
+<button data-nav="ref" onclick="show('ref')">📘 Référentiel</button>
 <button data-nav="review" onclick="show('review')">📝 Réviser</button>
 <button data-nav="bank" onclick="show('bank')">📚 Banque</button>
 <button data-nav="annales" onclick="show('annales')">📅 Annales</button>
@@ -113,6 +114,11 @@ label{display:block;font-size:14px;margin-bottom:8px}
 <p class="small">PDF annale + PDF correction → extraction (texte ou OCR) → contrôle automatique → validation automatique si aucune anomalie → validation humaine uniquement en cas d'anomalie. Les QCM validés entrent dans le moteur de révision espacée (SM-2, plafond 180 jours).</p>
 <p class="small"><b>Données :</b> banque et progression sont stockées dans ce navigateur (localStorage), les images de pages dans IndexedDB. Exportez régulièrement une sauvegarde depuis l'onglet 💾.</p>
 </div>
+</section>
+
+<section id="ref" class="view">
+<h1>📘 Référentiel par UE</h1>
+<div id="refArea"></div>
 </section>
 
 <section id="review" class="view">
@@ -4956,6 +4962,889 @@ async function boot(){
  refreshAll();
 }
 if(typeof document!=='undefined'&&document.getElementById('bankBody'))boot();
+
+</script>
+<script>
+/* =========================================================================
+   QCM Médecine — v17 : notions, priorités, flashcards vrai/faux,
+   carnet d'erreurs, confiance déclarée, concours pondéré et barème.
+   Module ajouté après le code v16 : il réutilise ses données et remplace
+   quelques fonctions (session, cartes, stats, contrôle) en les enveloppant.
+   ========================================================================= */
+(function(){
+'use strict';
+const C=[
+['Méthodes d’étude & techniques (histologie, microscopie, fractionnement, marquage)',/histolog|extemporan|coloration|immunohisto|hybridation in situ|centrifug|homogenat|fractionnement|microscop|marquage radio|immunoenzym|techniques? (de|permettant)|separation des constituants|mise en evidence|observation directe|autoradiograph|fixation au formol/],
+['Épithéliums',/epitheli|glande|secretion (sereuse|muqueuse|merocrine)/],
+['Tissus conjonctifs, adipeux, cartilage, os, sang',/conjonctif|adipeu|cartilag|osseu|ossification|tissu sanguin|chondrocyt|osteo/],
+['Tissus musculaire et nerveux',/tissu musculaire|tissu nerveux|transports? axona|rhabdomyo/],
+['Gamétogenèse, méiose, spermatogenèse',/gametogen|meiose|spermatogen|spermatogon|tubes? seminif/],
+['Ovogenèse, folliculogenèse, ovulation, cycle menstruel',/ovogen|follicul|ovulation|cycle menstruel|pre-ovulatoire/],
+['Fécondation, capacitation, procréation',/fecondation|fecondabilit|rencontre des gametes|capacitation|spermatozoides? dans les voies|procreation|contracepti|zygote\b(?! .*blastocyste)|entree du spermatozoide|transit des spermatozoides/],
+['Développement embryonnaire (sem. 1–4, gastrulation, neurulation, délimitation)',/semaine d(u|e) developpement|semaines? de developpement|gastrulation|neurulation|delimitation|blastocyste|disque embryonnaire|vasculogenese|clivage et l.implantation|developpement embryonnaire/],
+['Cellules souches & différenciation',/cellules? souches|differenciation cellulaire|pluripoten|reprogrammation|expression differentielle|homeogene/],
+['Mort cellulaire / apoptose',/apopto|mort cellulaire|caspase|tunel/],
+['Cycle cellulaire & sa régulation (mitose, cyclines/CDK)',/cycle cellulaire|mitose|transition g[12]|phase s\b|cycline|cdk|division et la proliferation|papilloma|chromatine \(suite\)|relation entre le cycle/],
+['Jonctions & adhésion cellulaire (CAM, desmosomes, points focaux)',/jonction|desmosom|cadherine|adhesion|\bcam\b|points? de contact focaux|molecules de (surface|liaison intercellulaire)/],
+['Cytosquelette, moteurs moléculaires & migration cellulaire',/cytosquelette|microtubul|microfilament|filaments intermediaires|dyneine|kinesine|migration cellulaire|motilite|locomotion|migrations vesiculaires|actine/],
+['Système endomembranaire : RE, Golgi, lysosomes, trafic vésiculaire',/endocytose|exocytose(?! des molecules)|transport vesiculaire|migrations vesiculaires/],
+['Signalisation – émission du signal & communication cellulaire',/emission du signal|paracrine|liberation des molecules signal|molecules? .?signal|communication cellulaire|hormones peptidiques|secretion d.insuline|capacitance/],
+['Signalisation – récepteurs canaux (GABA-A, glutamate…)',/recepteurs? canaux|gaba|glutamate/],
+['Signalisation – récepteurs enzymatiques & NF-κB (RTK, insuline, TGF-β)',/tyrosine kinase|insuline|tgf|nf-kb|serine-threonine|jak/],
+['Signalisation – protéines G & seconds messagers (AMPc, Ca²⁺, PDE)',/proteines? g\b|phosphodiesterase|calcium|batonnet|reception et decodage|toxine|dopamine|ampc|gmpc|potentiel membranaire d.une cellule endocrine/],
+['Signalisation – exercices expérimentaux & pharmacologie',/opiac|valproique|braziline|molecule [mn]\b|septicemie|pompe a protons|cox1|anneaux de voies|compte-tenu|vous cherchez|lps/],
+['Signalisation – liaison ligand-récepteur & généralités',/ligand|recepteur|signal/],
+['Généralités : diversité des cellules, procaryotes/eucaryotes',/dimension et la diversite|procaryote/],
+['Mitochondries & peroxysomes',/mitochond|peroxysom|chaine respiratoire/],
+['Noyau, enveloppe & pores nucléaires, nucléole',/noyau|nucleaire|nucleole|chromatine|pores? nucl|caryotype|npc|echanges noyau/],
+['Système endomembranaire : RE, Golgi, lysosomes, trafic vésiculaire',/golgi|reticulum|lysosom|endocytose|vesicul|endomembran|cytomembran|adressage|sequences de destination|circulation des proteines|domiciliation|glycosylation|tri des proteines|biosyntheses intracellulaires|ribosome|production et transport de proteines|secretion d.une proteine|compartiments intracellulaires|organites/],
+['Membrane plasmique & transports membranaires',/membran|pompe sodium|na\+ ?\/ ?k\+|transport|cholesterol|phospholipid|flip-flop|lipides membranaires/],
+['Notions de biochimie (annales de cellule)',/glycolyse|krebs|pyruvate|acides? amines?|acides? nucleiques|genomes?|glucides|lipid|peptide|replication|reparation d.adn|transcription|code genetique|codon|electrophorese|chromatographie|metabolisme|regulation hormonale|genes? eucaryote|methionine/],
+];
+const P=[
+['Solutions : osmolalité, propriétés colligatives, gaz dissous',/osmol|solute|dissolution d.un gaz|pression de vapeur|methodes de separation|radiateur|melanges/],
+['Unités & grandeurs physiques',/unites du systeme|grandeurs de masse|systeme international/],
+['Magnétisme & champ magnétique',/champ magnetique|magnetisme|solenoide|paramagnet|ferromagnet|diamagnet|proprietes magnetiques/],
+['Résonance magnétique nucléaire (spin, précession, relaxation)',/resonance|spin|precession|gyromagnet|relaxation|larmor/],
+['Ondes électromagnétiques & énergie des photons',/onde|rayonnements electromagnetiques|longueur d.onde|periodicite|energie e/],
+['Photométrie',/photometr|lumen|candela|efficacite lumineuse|luminance|aspect energetique de la lumiere/],
+['LASER',/laser/],
+['Optique physiologique : amétropies, astigmatisme, rétine',/ametrop|astigmat|hypermetrop|myop|remotum|retine|batonnet|bipolaire|plexi|courant d.obscurite|trouble .* vision/],
+['Semi-conducteurs & détecteurs',/semi-conducteur|detecteurs? a gaz|theorie des bandes/],
+['Structure de l’atome & du noyau (stabilité, liaison)',/vallee de stabilite|atomes du tableau|energie de liaison|couche k/],
+['Radioactivité : désintégrations, filiations, périodes, générateurs',/radioacti|desintegr|periode|generateur|technetium|molybdene|radon|isobar|cesium|fluor-18|cuivre-64|transmutation|thyroide|filiation|bequerel|\bbq\b/],
+['Interactions rayonnements–matière & atténuation (radioprotection)',/interaction|attenu|plomb|paravent|probabilite µ|compton|photoelectrique/],
+];
+const M=[
+['Métrologie : unités, dimensions, constantes',/planck|kilogramme|definition de la seconde|avogadro|unites fondamentales|en unites normalisees|surface corporelle|vitesse de marche|dimension/],
+['Tests diagnostiques : sensibilité, spécificité, VPP/VPN, dépistage',/sensibilit|specificit|valeur predictive|vpn|vpp|depistage|test (medical|serologi|diagnos)|nouvel examen|nouveau test|performances diagnos|bandelette|chimiluminescence/],
+['Épidémiologie des maladies infectieuses & émergentes',/infectie|emergent|zika|grippe|epidemie|transmission|reservoir|surveillance|gastroenterite|sars|paludisme|oreillons|vaccin/],
+['Essais thérapeutiques & études expérimentales',/essai|randomis|double aveugle|type experimental|efficacite d.un nouveau|tester l.efficacite|nouveau traitement/],
+['Études étiologiques : cohorte, cas-témoins, RR, OR, causalité',/prematur|cohorte|cas-temoin|cas temoin|risque relatif|\brr\b|odds ratio|\bor\b|etiologi|analytique|causalite|association entre|facteurs? de risque|expose/],
+['Épidémiologie descriptive : taux, incidence, prévalence, mortalité',/descriptive|incidence|prevalence|mortalite|taux|cancers? en france|indicateurs|domaines de l.epidemiologie|population .* annee|statistiques de cette ile|pour l.annee consideree/],
+['Tests statistiques : comparaison de moyennes/proportions, khi², Student',/\bu = |\|v\||parametrique|khi|chi|student|comparer|comparaison|differe|test (de|du|d.hypothese)|hypothese nulle|significati|degre de liberte|apparie/],
+['Corrélation & régression',/correlation|regression|droite|coefficient de correlation/],
+['Estimation & intervalles de confiance, échantillonnage',/intervalle de confiance|estim|echantillon|fluctuation|marge/],
+['Lois de probabilité : normale, binomiale, Poisson',/loi normale|distribution normale|normalement|binomiale|poisson|esperance|ecart-type|variance|densite|f\(x\)|centree reduite/],
+['Probabilités : conditionnelles, Bayes, dénombrement',/probabilit|independan|bayes|tirage|combinaison|au hasard|conditionnel/],
+['Statistique descriptive : moyenne, médiane, quartiles',/moyenne|mediane|quartile|mode\b|histogramme|effectif|classe/],
+['Fonctions, croissance de populations, dérivées',/centri|rayon du tube|bacterie|croissance|logistique|exponenti|derivee|logarithm|fonction/],
+];
+const PH=[
+['Équilibre acido-basique & gaz du sang (Davenport, acidoses/alcaloses)',/davenport|gaz du sang|acidose|alcalose|hyperventilation|detresse respiratoire|asthme|pco2|acido-basique|equilibres acido|coma|troubles de la conscience|bronchite|mont blanc|altitude|montagne|vomissements|diarrhee|noyade|tirage/],
+['Compartiments liquidiens & échanges hydriques',/compartiment|echanges hydriques|perfus|natremie|hydratation|masse grasse|se noie|poisson cru|eau totale|secteur/],
+['Métabolisme de base, bioénergétique & nutrition',/metabolisme de base|bioenerget|nutrition|nutritionnel|kcal|calori|mcdonald|musculation|sedentaire|1m\d\d|\d ?m ?\d\d|metabolisme des cellules musculaires/],
+['Thermorégulation',/thermoregul|froid|soleil|hyperthermie|hypothermie|transat|lagon|coup de chaleur/],
+['Système nerveux autonome (sympathique, parasympathique, miction)',/nerveux autonome|sympathique|parasympathique|\bsna\b|miction|uriner|foret sombre|polar|lagon lorsque|nagez/],
+['Jonction neuromusculaire & physiologie musculaire',/neuromusculaire|jnm|muscul|contraction|sarcomere|force musculaire|curare/],
+['Hémodynamique : écoulement, Bernoulli, Laplace, Starling, viscosité',/ecoulement|bernoulli|reynolds|viscosite|laplace|tension-rayon|dynamique des fluides|reseau vasculaire|starling|transcapillaire|pressions? (hydrostatique|oncotique)|ejecte|insuffisance cardiaque/],
+['Potentiel de repos & mouvements ioniques',/potentiel de repos|driving force|mouvements ioniques|nernst|goldman/],
+['Potentiel d’action, canaux voltage-dépendants & conduction nerveuse',/potentiel d.action|conduction|voltage|patch|excitabilit|neurone|axone|canaux|courant ionique|bouffee/],
+['Thermodynamique, thermochimie & équilibres chimiques',/thermochim|thermodynamique|enthalpie|entropie|equilibre (dynamique|suivant)|fonctions? d.etat|variables d.etat|procede haber|pentachlorure/],
+['Solutions : concentrations, molarité, osmolarité (calculs)',/masse atomique|mg de|g de (nacl|mgcl)|chlorure de|bicarbonate de sodium|solutes en suspension|permeable uniquement a l.eau|molarite|osmolarite/],
+['pH & acides-bases en solution (pKa, titrages, tampons)',/\bph\b|pka|acide|soude|neutralisation|tampon|naoh|nh3|nh4cl|ammoniac/],
+];
+const B=[
+['Chimie générale & organique (atomistique, géométrie, réactions, thermochimie)',/atomistique|geometrie|electrons celibataires|numero atomique|z ?= ?\d|pyridine|imidazole|isomere|chiral|racemique|substitution|oxydant|alcene|hbr|enthalpie|thermochimie|glace fond|geraniol|hydrocarbures|electron de l.atome|pka|acides? .*(cf3|ch2cl)|tetraedrique|reactions suivantes/],
+['Acides aminés',/acides? amines?|cysteine|glutamique|serine|arginine|l-lactate/],
+['Peptides & protéines : structure, hémoglobine',/peptide|structure des (peptides|proteines)|proteines? :|les proteines|hemoglobine|p50|globule rouge/],
+['Techniques de séparation des protéines (électrophorèse, chromatographie, purification)',/electrophorese|chromatographie|separation|purification|proteines? a, b(,| et) c|pm ?=|phi ?=|kda|poids moleculaire/],
+['Enzymologie (Michaelis, inhibitions, coenzymes)',/enzym|michael|\bkm\b|inhibiteur|vmax|coenzyme|nadp?h/],
+['Glucides : structure, disaccharides, polysaccharides',/glucide|disaccharide|polysaccharide|saccharose|lactose|cellobiose|galactose|monosaccharide|derives du glucose/],
+['Lipides : structure & métabolisme (β-oxydation)',/lipid|acides? gras|myristique|ch2\)14/],
+['Glycolyse, pyruvate & sa régulation',/glycolyse|pyruvate|pdh|acetyl-coa/],
+['Néoglucogenèse, glycogène, pentoses phosphates',/neoglucogen|glucoformateur|glycogen|pentoses/],
+['Cycle de Krebs, chaîne respiratoire & phosphorylation oxydative',/krebs|chaine respiratoire|oxydation(s)? phosphorylante|oxydation complete|matrice mitochondriale|riches en energie|mitochond/],
+['Régulation hormonale & intégration du métabolisme (insuline, glucagon)',/insuline|hormon|controle (du|hormonal)|regulation du metabolisme|glucagon|metabolisme glucidique|voies metaboliques/],
+['Acides nucléiques, génome, chromatine & chromosomes',/acides? nucleiques|genome|chromatine|chromosome|adn et genome|organisation du genome|metabolisme des acides nucleiques/],
+['Réplication & réparation de l’ADN, recombinaison',/replication|reparation|recombinaison|immunoglobulines/],
+['Transcription, maturation des ARNm & épigénétique',/transcription|maturation des arn|epigenet|arn/],
+['Traduction, code génétique & adressage des protéines',/traduction|code genetique|codon|adressage|genes? eucaryotes? codant|maturation des proteines|cellule musculaire striee peut exprimer/],
+['Techniques d’étude des acides nucléiques (PCR, séquençage)',/techniques d.etude|sequen|pcr|southern|sonde|maladie genetique/],
+];
+
+const RULES={C,P,M,PH,B};
+const OTHER='Autres / non classé';
+const LS_SET='qcmMedV17Settings';
+
+/* ---------- Outils ---------- */
+const deacc=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const yNum=y=>parseInt(String(y||'').slice(0,4))||0;
+const uniq=a=>[...new Set(a)];
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const pct=x=>Math.round((x||0)*100);
+function settings(){try{return Object.assign({bareme:[1,0.5,0.2,0],halfLife:4},JSON.parse(localStorage.getItem(LS_SET)||'{}'))}catch(e){return {bareme:[1,0.5,0.2,0],halfLife:4}}}
+function saveSettings(s){try{localStorage.setItem(LS_SET,JSON.stringify(s))}catch(e){}}
+function showModal(html){document.getElementById('modalContent').innerHTML=html;document.getElementById('modal').classList.add('show')}
+function hasAnswer(q){return normalizeAnswer(q.answer).length>0}
+function usable(q){return isValidated(q)&&hasAnswer(q)&&!q.noAnswer}
+
+/* ---------- 1. Notions ---------- */
+function ueKey(ue){
+ const u=deacc(ue);
+ if(/1\.4|math|biostat/.test(u))return 'M';
+ if(/1\.5|cellul|ue2\b/.test(u))return 'C';
+ if(/1\.6|physique|1\.06/.test(u))return 'P';
+ if(/1\.7|physio/.test(u))return 'PH';
+ if(/1\.8|bioch/.test(u))return 'B';
+ return null;
+}
+function classify(q){
+ const rules=RULES[ueKey(q.ue)];if(!rules)return OTHER;
+ const stem=deacc(q.question);
+ for(const [name,re] of rules)if(re.test(stem))return name;
+ const t=stem+' '+deacc(Object.values(q.choices||{}).join(' '));
+ let best=0,res=OTHER;
+ for(const [name,re] of rules){const c=(t.match(new RegExp(re.source,'g'))||[]).length;if(c>best){best=c;res=name}}
+ return res;
+}
+function notionOf(q){return q.notion||OTHER}
+function notionsForUE(ue){
+ const fromRules=(RULES[ueKey(ue)]||[]).map(r=>r[0]);
+ const fromData=db.records.filter(q=>ue==='all'||ueOf(q)===ue).map(notionOf);
+ return uniq([...fromRules.filter(n=>ue==='all'||fromData.includes(n)),...fromData]).sort((a,b)=>a.localeCompare(b,'fr'));
+}
+function assignNotions(all){
+ let n=0;
+ for(const q of db.records){
+   if(all?q.notionAuto!==false:!q.notion){const v=classify(q);if(q.notion!==v){q.notion=v;n++}q.notionAuto=true}
+ }
+ return n;
+}
+window.reclassNotions=function(){
+ const n=assignNotions(true);persist();refreshAll();
+ alert(`${n} QCM reclassés automatiquement. Les notions choisies à la main n'ont pas été modifiées.`);
+};
+window.setNotion=function(id,val){
+ const q=findRecord(id);if(!q)return;
+ if(val==='__auto'){q.notion=classify(q);q.notionAuto=true}
+ else if(val==='__new'){const v=prompt('Nom de la nouvelle notion :',q.notion||'');if(!v||!v.trim())return openQ(id);q.notion=v.trim();q.notionAuto=false}
+ else{q.notion=val;q.notionAuto=false}
+ persist();openQ(id);
+};
+
+/* ---------- 2. Récurrence pondérée, maîtrise, priorité ---------- */
+let cache=null;
+function ueYears(ue){return uniq(db.records.filter(q=>ueOf(q)===ue).map(q=>yNum(yearOf(q))).filter(Boolean)).sort()}
+function yearWeight(y,maxY){return Math.pow(0.5,(maxY-y)/(settings().halfLife||4))}
+function qScore(q){
+ const h=(progressOf(q.id).history||[]).slice(-3);
+ if(!h.length)return null;
+ return h.reduce((s,x)=>s+(x.correct?(x.conf==='doute'?0.5:1):0),0)/h.length;
+}
+function notionTable(ue){
+ cache=cache||{};if(cache['nt|'+ue])return cache['nt|'+ue];
+ const years=ueYears(ue),maxY=Math.max(0,...years);
+ const wTot=years.reduce((s,y)=>s+yearWeight(y,maxY),0)||1;
+ const groups={};
+ for(const q of db.records.filter(x=>ueOf(x)===ue))(groups[notionOf(q)]=groups[notionOf(q)]||[]).push(q);
+ const rows=Object.entries(groups).map(([name,qs])=>{
+   const ys=uniq(qs.map(q=>yNum(yearOf(q))).filter(Boolean)).sort();
+   const sumW=ys.reduce((s,y)=>s+yearWeight(y,maxY),0),recW=sumW/wTot,recS=(sumW+1)/(wTot+2);
+   const pool=qs.filter(usable);
+   const scores=pool.map(qScore);
+   const seen=scores.filter(s=>s!==null);
+   const mastery=pool.length?seen.reduce((a,b)=>a+b,0)/pool.length:0;
+   const last=ys[ys.length-1]||0;
+   const after=years.filter(y=>y>last).length;
+   return {ue,name,n:qs.length,pool:pool.length,years:ys.length,totalYears:years.length,recW,mastery,
+     coverage:pool.length?seen.length/pool.length:0,success:seen.length?seen.reduce((a,b)=>a+b,0)/seen.length:null,
+     last,gone:after>=3,priority:(after>=3?0.35:1)*recS*(1-mastery)};
+ }).sort((a,b)=>b.priority-a.priority);
+ return cache['nt|'+ue]=rows;
+}
+const _invalidate=window.invalidateRecurrence;
+window.invalidateRecurrence=function(){cache=null;return _invalidate.apply(this,arguments)};
+function allUEs(){return uniq(db.records.map(ueOf)).sort()}
+function topNotions(ue,k){
+ const rows=(ue==='all'?allUEs().flatMap(u=>notionTable(u)):notionTable(ue)).filter(r=>r.pool>0&&r.name!==OTHER);
+ return rows.sort((a,b)=>b.priority-a.priority).slice(0,k);
+}
+
+/* ---------- Ordres de passage ---------- */
+function interleave(list,keyFn){
+ const g={};for(const q of list)(g[keyFn(q)]=g[keyFn(q)]||[]).push(q);
+ const lanes=shuffle(Object.values(g));const out=[];
+ while(lanes.some(l=>l.length))for(const l of lanes)if(l.length)out.push(l.shift());
+ return out;
+}
+function needFirst(a,b){ // jamais vus / en retard / faibles d'abord
+ const s=q=>{const p=progress[q.id];if(!p||!p.due)return 1;if(p.due<=endOfToday())return 0;const sc=qScore(q);return 2+(sc===null?0:sc)};
+ return s(a)-s(b);
+}
+
+/* ---------- Carnet d'erreurs (niveau proposition) ---------- */
+function recordErrors(id,given,expected,letters){
+ const p=progress[id];if(!p)return;
+ p.errs=p.errs||{};const t=Date.now();
+ for(const l of letters){
+   const wrong=given.includes(l)!==expected.includes(l);
+   const e=p.errs[l];
+   if(wrong)p.errs[l]={n:((e&&e.n)||0)+1,streak:0,last:t,resolved:false};
+   else if(e&&!e.resolved){e.streak=(e.streak||0)+1;if(e.streak>=2)e.resolved=true}
+ }
+}
+function openErrors(){
+ const out=[];
+ for(const q of db.records){const p=progress[q.id];if(!p||!p.errs)continue;
+   for(const [l,e] of Object.entries(p.errs))if(!e.resolved)out.push({q,l,e,truth:normalizeAnswer(q.answer).includes(l)});}
+ return out.sort((a,b)=>b.e.last-a.e.last);
+}
+window.openCarnet=function(){
+ const errs=openErrors();
+ const byUE={};for(const x of errs){const u=ueOf(x.q),n=notionOf(x.q);((byUE[u]=byUE[u]||{})[n]=byUE[u][n]||[]).push(x)}
+ showModal(`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">📓 Carnet d'erreurs</h2><button class="secondary" onclick="closeModal()">Fermer</button></div>
+ <p class="small">Chaque proposition que tu as mal jugée (cochée à tort ou oubliée) est notée ici. Elle sort du carnet quand tu la juges correctement deux fois de suite.</p>
+ ${errs.length?`<button class="primary" onclick="closeModal();startErrorsSession()">🔁 Retravailler ces ${uniq(errs.map(x=>x.q.id)).length} QCM (mélangés par notion)</button>`:'<div class="success">Carnet vide : aucune erreur en attente.</div>'}
+ ${Object.entries(byUE).map(([u,ns])=>`<h3 style="margin-top:14px">${esc(u)}</h3>`+Object.entries(ns).sort((a,b)=>b[1].length-a[1].length).map(([n,list])=>`<details style="margin:6px 0"><summary><b>${esc(n)}</b> <span class="badge b-danger">${list.length}</span></summary>
+   ${list.map(x=>`<div class="anomaly" style="color:var(--text)"><span class="small">${esc((x.q.question||'').slice(0,90))}…</span><br><b>${x.l}.</b> ${esc(x.q.choices?.[x.l]||'')}<br>
+   <span class="badge ${x.truth?'b-ok':'b-danger'}">Cette proposition est ${x.truth?'VRAIE':'FAUSSE'}</span> <span class="small">ratée ${x.e.n} fois, dernière le ${fmtDate(x.e.last)}</span>
+   <button class="secondary" onclick="openQ('${x.q.id}')">Voir le QCM</button></div>`).join('')}</details>`).join('')).join('')}`);
+};
+window.startErrorsSession=function(){
+ const ids=uniq(openErrors().map(x=>x.q.id));
+ const qs=ids.map(findRecord).filter(Boolean);
+ if(!qs.length){alert('Carnet vide.');return}
+ startQueue(interleave(qs,notionOf).map(q=>q.id));
+};
+function startQueue(ids){
+ session={queue:ids,idx:0,sel:new Set(),revealed:false,results:[],startedAt:Date.now(),deferred:0};
+ show('review');renderCard();
+}
+
+/* ---------- 3. Flashcards vrai/faux sur les affirmations ---------- */
+const CTX=/fleche|schema|figure|microphoto|structure (marquee|reperee|indiquee)|element (marque|represente)|zone marquee|ci dessus|ci dessous|aucune des|toutes les propositions|tableau|courbe|photo|image [a-z0-9]\b|etoile/;
+const affNorm=s=>deacc(s).replace(/[^a-z0-9]+/g,' ').trim();
+function hash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return (h>>>0).toString(36)}
+function affIndex(){
+ cache=cache||{};if(cache.aff)return cache.aff;
+ const groups=new Map();
+ for(const q of db.records){
+   if(!isValidated(q)||!hasAnswer(q)||q.noAnswer)continue;
+   const ans=normalizeAnswer(q.answer);
+   for(const l of optLetters(q)){
+     const t=(q.choices?.[l]||'').trim();const n=affNorm(t);
+     if(n.length<25||CTX.test(n))continue;
+     const key=ueOf(q)+'|'+n;
+     let g=groups.get(key);
+     if(!g){g={id:'VF:'+hash(key),ue:ueOf(q),text:t,occ:[]};groups.set(key,g)}
+     g.occ.push({qid:q.id,letter:l,truth:ans.includes(l),year:yearOf(q),notion:notionOf(q),stem:q.question});
+   }
+ }
+ const all=[...groups.values()].map(g=>{
+   const truths=uniq(g.occ.map(o=>o.truth));
+   const notions={};g.occ.forEach(o=>notions[o.notion]=(notions[o.notion]||0)+1);
+   return Object.assign(g,{nQcm:uniq(g.occ.map(o=>o.qid)).length,years:uniq(g.occ.map(o=>o.year)).sort(),
+     contradictory:truths.length>1,truth:truths[0],notion:Object.entries(notions).sort((a,b)=>b[1]-a[1])[0][0]});
+ });
+ const byId=new Map(all.map(g=>[g.id,g]));
+ return cache.aff={all,byId};
+}
+function flashPool(ue,notion,scope){
+ return affIndex().all.filter(g=>!g.contradictory&&(ue==='all'||g.ue===ue)&&(notion==='all'||g.notion===notion)&&(scope==='all'||g.nQcm>1));
+}
+window.startFlash=function(){
+ const ue=document.getElementById('fcUE')?.value||'all',notion=document.getElementById('fcNotion')?.value||'all';
+ const scope=document.getElementById('fcScope')?.value||'rec',len=Number(document.getElementById('fcLen')?.value||30);
+ let pool=flashPool(ue,notion,scope);
+ if(!pool.length){alert('Aucune affirmation pour ces critères. Essaie « Toutes les affirmations » ou une autre notion.');return}
+ const due=pool.filter(g=>{const p=progress[g.id];return !p||!p.due||p.due<=endOfToday()});
+ const later=pool.filter(g=>!due.includes(g));
+ pool=[...shuffle(due).sort((a,b)=>b.nQcm-a.nQcm),...later.sort((a,b)=>(progress[a.id].due||0)-(progress[b.id].due||0))];
+ const ids=interleave(len>0?pool.slice(0,len):pool,g=>g.notion).map(g=>g.id);
+ session={flash:true,queue:ids,idx:0,sel:new Set(),revealed:false,pick:null,results:[],startedAt:Date.now()};
+ renderFlash();
+};
+function renderFlash(){
+ const area=document.getElementById('reviewArea');if(!area||!session)return;
+ if(session.idx>=session.queue.length)return renderFlashEnd();
+ const g=affIndex().byId.get(session.queue[session.idx]);
+ if(!g){session.idx++;return renderFlash()}
+ const o=g.occ[0];
+ let fb='';
+ if(session.revealed){
+   const ok=session.pick===g.truth;
+   fb=`<div class="${ok?'success':'anomaly'}"><b>${ok?'✅ Juste':'❌ Faux'}</b> — cette affirmation est <b>${g.truth?'VRAIE':'FAUSSE'}</b>.</div>
+   <p class="small">Tombée ${g.nQcm} fois (${g.years.map(esc).join(', ')}) · notion : ${esc(g.notion)}</p>
+   <div style="display:flex;gap:8px;flex-wrap:wrap">
+    ${g.occ.slice(0,4).map(x=>`<button class="secondary" onclick="openQ('${x.qid}')">Voir ${esc(x.qid)}</button>`).join('')}</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+    ${ok?`<button class="warn" onclick="flashGrade(3)">1 · Hésité</button><button class="primary" onclick="flashGrade(4)">2 · Bien</button><button class="ok" onclick="flashGrade(5)">3 · Facile</button>`
+        :`<button class="dangerbtn" onclick="flashGrade(1)">Continuer (revient demain)</button>`}</div>`;
+ }
+ area.innerHTML=`<div class="card">
+  <div class="progress"><div style="width:${Math.round(session.idx/session.queue.length*100)}%"></div></div>
+  <div class="small" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+   <span>🃏 Affirmation ${session.idx+1} / ${session.queue.length} · ${esc(g.ue)} · ${g.nQcm>1?`<span class="badge b-warn">tombée ${g.nQcm}×</span>`:''}</span>
+   <button class="secondary" onclick="quitSession()">Quitter</button></div>
+  <p class="small" style="margin:12px 0 4px">Contexte : ${esc((o.stem||'').replace(/\s+/g,' ').slice(0,160))}</p>
+  <h2 style="margin:6px 0 14px;line-height:1.35">${esc(g.text)}</h2>
+  ${session.revealed?fb:`<div style="display:flex;gap:10px;flex-wrap:wrap">
+   <button class="ok" style="min-width:120px" onclick="flashPick(true)">Vrai <span class="kbd">V</span></button>
+   <button class="dangerbtn" style="min-width:120px" onclick="flashPick(false)">Faux <span class="kbd">F</span></button></div>`}
+ </div>`;
+}
+window.flashPick=function(v){if(!session||!session.flash||session.revealed)return;session.pick=v;session.revealed=true;renderFlash()};
+window.flashGrade=function(quality){
+ if(!session||!session.flash||!session.revealed)return;
+ const id=session.queue[session.idx],g=affIndex().byId.get(id);
+ const ok=session.pick===g.truth;
+ schedule(id,quality,ok);
+ session.results.push({id,correct:ok});
+ session.idx++;session.revealed=false;session.pick=null;
+ persist();updateStats();renderFlash();
+};
+function renderFlashEnd(){
+ const area=document.getElementById('reviewArea');
+ const n=session.results.length,ok=session.results.filter(r=>r.correct).length;
+ const failed=session.results.filter(r=>!r.correct).map(r=>r.id);
+ area.innerHTML=`<div class="card"><h2>Série terminée</h2><p><b>${ok}/${n}</b> affirmations justes (${n?Math.round(ok/n*100):0} %).</p>
+ <div style="display:flex;gap:8px;flex-wrap:wrap">${failed.length?`<button class="primary" onclick="flashRedo()">🔁 Refaire les ${failed.length} ratées</button>`:''}
+ <button class="secondary" onclick="quitSessionForce()">Retour</button></div></div>`;
+ session.failedIds=failed;
+}
+window.flashRedo=function(){const ids=session.failedIds||[];session={flash:true,queue:shuffle(ids.slice()),idx:0,sel:new Set(),revealed:false,pick:null,results:[],startedAt:Date.now()};renderFlash()};
+window.refreshFlashNotions=function(){
+ const ue=document.getElementById('fcUE')?.value||'all',sel=document.getElementById('fcNotion');if(!sel)return;
+ const scope=document.getElementById('fcScope')?.value||'rec';
+ const pool=flashPool(ue,'all',scope);const c={};pool.forEach(g=>c[g.notion]=(c[g.notion]||0)+1);
+ sel.innerHTML=`<option value="all">Toutes (${pool.length})</option>`+Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([n,k])=>`<option value="${esc(n)}">${esc(n)} (${k})</option>`).join('');
+};
+
+/* ---------- 5. Confiance déclarée ---------- */
+window.setConf=function(c){if(!session||session.exam||session.flash||session.revealed)return;session.conf=session.conf===c?null:c;renderCard()};
+const _renderCard=window.renderCard;
+window.renderCard=function(){
+ _renderCard.apply(this,arguments);
+ if(!session||session.exam||session.flash)return;
+ const area=document.getElementById('reviewArea');if(!area)return;
+ const card=area.querySelector('.card');if(!card)return;
+ const q=findRecord(session.queue[session.idx]);
+ if(q){const h=card.querySelector('.small span');if(h)h.insertAdjacentHTML('beforeend',` <span class="badge b-blue">${esc(notionOf(q))}</span>`)}
+ if(!session.revealed){
+   const btn=[...card.querySelectorAll('button.primary')].find(b=>/Valider ma réponse/.test(b.textContent));
+   if(btn)btn.insertAdjacentHTML('beforebegin',`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><span class="small">Avant de valider, tu es :</span>
+     <button class="${session.conf==='sur'?'ok':'secondary'}" onclick="setConf('sur')">Sûr <span class="kbd">S</span></button>
+     <button class="${session.conf==='doute'?'warn':'secondary'}" onclick="setConf('doute')">J'hésite <span class="kbd">H</span></button></div>`);
+ }else if(session.conf==='doute'&&q&&!q.noAnswer){
+   const exact=[...session.sel].sort().join('')===normalizeAnswer(q.answer).slice().sort().join('');
+   if(exact){const s=card.querySelector('.success');if(s)s.insertAdjacentHTML('afterend','<div class="warnbox">Juste, mais tu hésitais : ce QCM est compté comme fragile et reviendra dans 3 jours au plus, quelle que soit l\'auto-évaluation.</div>')}
+ }
+};
+const _grade=window.grade;
+window.grade=function(quality){
+ if(!session||!session.revealed)return _grade.apply(this,arguments);
+ const id=session.queue[session.idx],q=findRecord(id),conf=session.conf||'sur';
+ session.conf=null;
+ const given=[...session.sel],expected=normalizeAnswer(q?q.answer:[]);
+ const exact=given.slice().sort().join('')===expected.slice().sort().join('');
+ if(conf==='doute'&&exact)quality=Math.min(quality,3);
+ _grade.call(this,quality);
+ const p=progress[id];
+ if(p){
+   const h=p.history[p.history.length-1];if(h)h.conf=conf;
+   if(conf==='doute'&&exact&&p.interval>3){p.interval=3;p.due=addDays(Date.now(),3)}
+   if(q&&!q.noAnswer)recordErrors(id,given,expected,optLetters(q));
+   persist();
+ }
+};
+const _skip=window.skipCard;
+window.skipCard=function(){if(session)session.conf=null;return _skip.apply(this,arguments)};
+window.addEventListener('keydown',ev=>{
+ if(!session||!document.getElementById('review')?.classList.contains('active'))return;
+ if(document.getElementById('modal')?.classList.contains('show'))return;
+ const k=ev.key.toUpperCase();
+ if(session.flash){
+   ev.stopPropagation();
+   if(!session.revealed&&(k==='V'||k==='F')){ev.preventDefault();flashPick(k==='V');return}
+   if(session.revealed){const g=affIndex().byId.get(session.queue[session.idx]);const ok=g&&session.pick===g.truth;
+     if(ev.key==='Enter'||['1','2','3'].includes(ev.key)){ev.preventDefault();flashGrade(ok?({'1':3,'2':4,'3':5}[ev.key]||4):1)}}
+   return;
+ }
+ if(!session.exam&&!session.revealed&&(k==='S'||k==='H')){ev.preventDefault();setConf(k==='S'?'sur':'doute')}
+},true);
+
+/* ---------- Session : filtre notion, modes ciblé / carnet, ordre mélangé ---------- */
+const _renderReview=window.renderReview;
+window.renderReview=function(){
+ if(session&&session.flash)return renderFlash();
+ _renderReview.apply(this,arguments);
+ const area=document.getElementById('reviewArea');
+ const ueSel=document.getElementById('sessUE');if(!area||!ueSel||session)return;
+ const mode=document.getElementById('sessMode');
+ const nErr=uniq(openErrors().map(x=>x.q.id)).length;
+ mode.insertAdjacentHTML('afterbegin',`<option value="target">🎯 Révision ciblée : notions prioritaires</option>`);
+ mode.insertAdjacentHTML('beforeend',`<option value="errors">📓 Carnet d'erreurs (${nErr})</option>`);
+ mode.value='due';
+ ueSel.closest('label').insertAdjacentHTML('afterend',`<label>Notion<select id="sessNotion" style="width:100%"></select></label>`);
+ const ord=document.getElementById('sessOrder');
+ ord.insertAdjacentHTML('beforeend','<option value="mix">🔀 Mélangé par notion (conseillé pour entretenir)</option>');
+ refreshNotionSelect();
+ area.insertAdjacentHTML('afterbegin',priorityCard());
+ const sessCard=area.querySelector('#sessMode').closest('.card');
+ sessCard.insertAdjacentHTML('beforeend',`<p class="small">🎯 La révision ciblée prend les notions les plus rentables (tombent souvent, surtout ces dernières années, et que tu maîtrises le moins) et les mélange. Déclare « Sûr » ou « J'hésite » avant de valider : une réponse juste donnée en hésitant reste fragile.</p>
+  <button class="secondary" onclick="openCarnet()">📓 Ouvrir le carnet d'erreurs (${openErrors().length} proposition(s))</button>`);
+ sessCard.insertAdjacentHTML('afterend',flashCard());
+ refreshFlashNotions();
+ const exam=[...area.querySelectorAll('.card')].find(c=>/Concours blanc/.test(c.querySelector('h3')?.textContent||''));
+ if(exam)exam.insertAdjacentHTML('afterend',weightedExamCard());
+};
+function refreshNotionSelect(){
+ const ue=document.getElementById('sessUE')?.value||'all',sel=document.getElementById('sessNotion');if(!sel)return;
+ const cur=sel.value;const base=db.records.filter(q=>isValidated(q)&&(ue==='all'||ueOf(q)===ue));
+ const c={};base.forEach(q=>c[notionOf(q)]=(c[notionOf(q)]||0)+1);
+ sel.innerHTML=`<option value="all">Toutes</option>`+Object.keys(c).sort((a,b)=>a.localeCompare(b,'fr')).map(n=>`<option value="${esc(n)}">${esc(n)} (${c[n]})</option>`).join('');
+ if(c[cur])sel.value=cur;
+}
+const _rsf=window.refreshSessionFilters;
+window.refreshSessionFilters=function(){_rsf.apply(this,arguments);refreshNotionSelect()};
+window.startSession=function(){
+ const v=id=>document.getElementById(id)?.value;
+ const mode=v('sessMode')||'due',ue=v('sessUE')||'all',annale=v('sessAnnale')||'all',year=v('sessYear')||'all';
+ const notion=v('sessNotion')||'all',len=Number(v('sessLen')||0),order=v('sessOrder')||'late';
+ const catchup=document.getElementById('sessCatchup')?Number(v('sessCatchup')):DEFAULT_CATCHUP;
+ const filt=q=>(ue==='all'||ueOf(q)===ue)&&(year==='all'||yearOf(q)===year)&&(annale==='all'||q.source===annale)&&(notion==='all'||notionOf(q)===notion);
+ let pool,ordered,deferred=0;
+ if(mode==='target'){
+   const top=topNotions(ue,ue==='all'?6:4).map(r=>r.ue+'|'+r.name);
+   pool=db.records.filter(q=>usable(q)&&filt(q)&&top.includes(ueOf(q)+'|'+notionOf(q)));
+   if(!pool.length){alert('Aucun QCM pour la révision ciblée avec ces filtres.');return}
+   const g={};pool.forEach(q=>(g[notionOf(q)]=g[notionOf(q)]||[]).push(q));
+   Object.values(g).forEach(l=>{shuffle(l);l.sort(needFirst)});
+   ordered=[];const lanes=Object.values(g);while(lanes.some(l=>l.length))for(const l of lanes)if(l.length)ordered.push(l.shift());
+   if(!len)ordered=ordered.slice(0,30);
+ }else{
+   if(mode==='errors'){const ids=new Set(openErrors().map(x=>x.q.id));pool=db.records.filter(q=>ids.has(q.id))}
+   else pool=reviewPools()[mode]||[];
+   pool=pool.filter(filt);
+   if(!pool.length){alert('Aucun QCM ne correspond à ces critères.');return}
+   const split=splitPool(pool);
+   const late=catchup>0?split.late.slice(0,catchup):split.late;deferred=split.late.length-late.length;
+   ordered=[...late,...split.today,...split.new,...split.future];
+   if(order==='random')shuffle(ordered);
+   if(order==='mix')ordered=interleave(ordered,notionOf);
+ }
+ let queue=ordered.map(q=>q.id);if(len>0)queue=queue.slice(0,len);
+ session={queue,idx:0,sel:new Set(),revealed:false,results:[],startedAt:Date.now(),deferred};
+ renderCard();
+};
+window.startNotionSession=function(ue,notion,mixWith){
+ let qs=db.records.filter(q=>usable(q)&&ueOf(q)===ue&&notionOf(q)===notion);
+ shuffle(qs);qs.sort(needFirst);
+ startQueue(qs.slice(0,25).map(q=>q.id));
+};
+window.startTopMix=function(ue){
+ const top=topNotions(ue,ue==='all'?6:4);
+ const qs=[];for(const r of top){const l=db.records.filter(q=>usable(q)&&ueOf(q)===r.ue&&notionOf(q)===r.name);shuffle(l);l.sort(needFirst);qs.push(...l.slice(0,8))}
+ if(!qs.length){alert('Aucun QCM disponible.');return}
+ startQueue(interleave(qs,notionOf).map(q=>q.id));
+};
+
+/* ---------- Carte « Priorités » ---------- */
+window.__prioUE=window.__prioUE||null;
+function priorityCard(){
+ const ues=allUEs();if(!ues.length)return '';
+ const ue=window.__prioUE&&(window.__prioUE==='all'||ues.includes(window.__prioUE))?window.__prioUE:'all';
+ const top=topNotions(ue,8);
+ return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0">🎯 Tes priorités</h3>
+  <select onchange="window.__prioUE=this.value;renderReview()"><option value="all">Toutes les UE</option>${ues.map(u=>`<option${u===ue?' selected':''}>${esc(u)}</option>`).join('')}</select></div>
+  <p class="small">Priorité = fréquence aux examens (années récentes comptées davantage) × ce qu'il te reste à maîtriser.</p>
+  ${top.map(r=>`<div class="bar" style="display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap">
+   <span style="flex:1 1 260px"><b>${esc(r.name)}</b>${ue==='all'?` <span class="small">${esc(r.ue)}</span>`:''}<br>
+   <span class="small">tombée ${r.years}/${r.totalYears} années · maîtrise ${pct(r.mastery)} % · ${r.pool} QCM${r.gone?` · <span class="badge b-warn">plus tombée depuis ${r.last}</span>`:''}</span></span>
+   <span class="n17track" style="flex:0 0 120px"><span style="width:${Math.min(100,pct(r.priority/(top[0].priority||1)))}%"></span></span>
+   <button class="secondary" onclick="startNotionSession(${JSON.stringify(r.ue).replace(/"/g,'&quot;')},${JSON.stringify(r.name).replace(/"/g,'&quot;')})">▶️ Série</button></div>`).join('')||'<p class="small">Pas encore de données.</p>'}
+  <button class="primary" style="margin-top:8px" onclick="startTopMix(${JSON.stringify(ue).replace(/"/g,'&quot;')})">🔀 Série mélangée des notions prioritaires</button></div>`;
+}
+function flashCard(){
+ const ues=uniq(affIndex().all.map(g=>g.ue)).sort();
+ const nRec=affIndex().all.filter(g=>!g.contradictory&&g.nQcm>1).length;
+ const dueN=affIndex().all.filter(g=>{const p=progress[g.id];return p&&p.due&&p.due<=endOfToday()}).length;
+ return `<div class="card"><h3>🃏 Flashcards vrai / faux</h3>
+ <p class="small">Chaque proposition de QCM devient une affirmation à juger vraie ou fausse. Par défaut, seules celles qui sont déjà tombées plusieurs fois (${nRec}) sont proposées. ${dueN?`<b>${dueN}</b> à revoir aujourd'hui.`:''} Raccourcis <span class="kbd">V</span> <span class="kbd">F</span> puis <span class="kbd">Entrée</span>.</p>
+ <div class="editgrid">
+  <label>UE<select id="fcUE" style="width:100%" onchange="refreshFlashNotions()"><option value="all">Toutes</option>${ues.map(u=>`<option>${esc(u)}</option>`).join('')}</select></label>
+  <label>Affirmations<select id="fcScope" style="width:100%" onchange="refreshFlashNotions()"><option value="rec">Tombées plusieurs fois</option><option value="all">Toutes</option></select></label>
+  <label>Notion<select id="fcNotion" style="width:100%"></select></label>
+  <label>Longueur<select id="fcLen" style="width:100%"><option value="20">20</option><option value="30" selected>30</option><option value="50">50</option><option value="0">Tout</option></select></label>
+ </div><button class="primary" onclick="startFlash()">▶️ Lancer les flashcards</button></div>`;
+}
+
+/* ---------- 6. Concours pondéré par notions + barème ---------- */
+function weightedExamCard(){
+ const s=settings();const b=s.bareme;
+ const ues=uniq(db.records.filter(usable).map(ueOf)).sort();
+ return `<div class="card"><h3>🏁 Concours blanc réaliste (tiré par notions)</h3>
+ <p class="small">Les questions sont tirées dans toutes les annales de l'UE, en respectant la fréquence réelle de chaque notion aux examens. Les notions qui ne tombent plus pèsent moins.</p>
+ <div class="editgrid">
+  <label>UE<select id="wxUE" style="width:100%">${ues.map(u=>`<option>${esc(u)}</option>`).join('')}</select></label>
+  <label>Nombre de QCM<select id="wxN" style="width:100%"><option>20</option><option selected>30</option><option>45</option><option>60</option></select></label>
+  <label>Durée<select id="wxLimit" style="width:100%"><option value="0">Sans limite</option><option value="30">30 min</option><option value="45">45 min</option><option value="60" selected>1 h</option><option value="90">1 h 30</option><option value="120">2 h</option></select></label>
+ </div>
+ <button class="primary" onclick="startWeightedExam()">🏁 Commencer</button>
+ <details style="margin-top:12px"><summary><b>Barème de notation</b> <span class="small">(appliqué à tous les concours)</span></summary>
+  <p class="small">Points par QCM selon le nombre de discordances (propositions mal jugées). Par défaut : barème courant 1 / 0,5 / 0,2 / 0. Remplace-le par celui de ta fac.</p>
+  <div class="editgrid">${['0 discordance','1 discordance','2 discordances','3 et plus'].map((lab,i)=>`<label>${lab}<input type="number" step="0.05" min="-1" max="1" value="${b[i]}" id="bar${i}" style="width:100%"></label>`).join('')}</div>
+  <button class="secondary" onclick="saveBareme()">Enregistrer le barème</button> <span id="barMsg" class="small"></span></details></div>`;
+}
+window.saveBareme=function(){
+ const s=settings();s.bareme=[0,1,2,3].map(i=>Number(document.getElementById('bar'+i)?.value)||0);saveSettings(s);
+ const m=document.getElementById('barMsg');if(m)m.textContent='Barème enregistré.';
+};
+window.startWeightedExam=function(){
+ const ue=document.getElementById('wxUE')?.value,N=Number(document.getElementById('wxN')?.value||30),limit=Number(document.getElementById('wxLimit')?.value||0);
+ const rows=notionTable(ue).filter(r=>r.pool>0);
+ if(!rows.length){alert('Aucun QCM corrigé pour cette UE.');return}
+ const years=ueYears(ue),maxY=Math.max(...years);
+ const w=rows.map(r=>r.recW*(r.gone?0.35:1));const W=w.reduce((a,b)=>a+b,0)||1;
+ let alloc=rows.map((r,i)=>({r,x:N*w[i]/W}));
+ alloc.forEach(a=>{a.k=Math.min(a.r.pool,Math.floor(a.x))});
+ let rest=N-alloc.reduce((s,a)=>s+a.k,0);
+ for(const a of alloc.slice().sort((p,q)=>(q.x-Math.floor(q.x))-(p.x-Math.floor(p.x))))if(rest>0&&a.k<a.r.pool){a.k++;rest--}
+ while(rest>0&&alloc.some(a=>a.k<a.r.pool)){for(const a of alloc.sort((p,q)=>q.x-p.x))if(rest>0&&a.k<a.r.pool){a.k++;rest--}}
+ const picked=[];
+ for(const a of alloc){
+   const l=db.records.filter(q=>usable(q)&&ueOf(q)===ue&&notionOf(q)===a.r.name)
+     .map(q=>({q,s:Math.random()*yearWeight(yNum(yearOf(q)),maxY)})).sort((p,q)=>q.s-p.s).slice(0,a.k).map(x=>x.q);
+   picked.push(...l);
+ }
+ if(session&&session.exam&&!session.finished&&!confirm('Une épreuve est en cours. La remplacer ?'))return;
+ session={exam:true,source:`Concours pondéré ${ue} (${picked.length} QCM)`,queue:shuffle(picked).map(q=>q.id),idx:0,answers:{},flags:new Set(),
+   startedAt:Date.now(),limitMin:limit,withSchedule:true,finished:false,results:[]};
+ saveExamState();startExamTimer();renderExamCard();
+};
+function baremeOf(results){
+ const b=settings().bareme;let pts=0;
+ const det=results.map(r=>{
+   const q=findRecord(r.id);const L=q?optLetters(q):[];
+   const d=L.filter(l=>r.given.includes(l)!==r.expected.includes(l)).length;
+   const p=r.answered?b[Math.min(d,3)]:0;pts+=p;return d;
+ });
+ return {pts,max:results.length,det};
+}
+const _finishExam=window.finishExam;
+window.finishExam=function(){
+ const before=exams.length;
+ const snap=session&&session.exam?{answers:JSON.parse(JSON.stringify(session.answers||{})),queue:session.queue.slice(),sched:session.withSchedule}:null;
+ _finishExam.apply(this,arguments);
+ if(!snap||exams.length===before||!session||!session.results)return;
+ const bm=baremeOf(session.results);
+ const e=exams[exams.length-1];e.points=Math.round(bm.pts*100)/100;e.note20=Math.round(bm.pts/bm.max*2000)/100;persistExams();
+ if(snap.sched)for(const r of session.results){if(!r.answered)continue;const q=findRecord(r.id);if(q)recordErrors(r.id,r.given.split(''),r.expected.split(''),optLetters(q))}
+ persist();renderExamResult();
+};
+const _renderExamResult=window.renderExamResult;
+window.renderExamResult=function(){
+ _renderExamResult.apply(this,arguments);
+ if(!session||!session.results)return;
+ const bm=baremeOf(session.results);
+ const grid=document.querySelector('#reviewArea .grid');
+ if(grid)grid.insertAdjacentHTML('beforeend',`<div class="stat"><strong>${(bm.pts/bm.max*20).toFixed(1)}/20</strong>note au barème (${bm.pts.toFixed(2)} pts)</div>`);
+ const byN={};session.results.forEach(r=>{const q=findRecord(r.id);const n=q?notionOf(q):OTHER;byN[n]=byN[n]||{n:0,ok:0};byN[n].n++;if(r.correct)byN[n].ok++});
+ const h=document.querySelector('#reviewArea h3');
+ if(h)h.insertAdjacentHTML('beforebegin',`<h3 style="margin-top:12px">Par notion</h3>${Object.entries(byN).sort((a,b)=>a[1].ok/a[1].n-b[1].ok/b[1].n).map(([n,v])=>`<div class="bar"><span class="lab" style="min-width:0;flex:1">${esc(n)}</span><span class="n17track" style="flex:1"><span style="width:${Math.round(v.ok/v.n*100)}%"></span></span><span class="val">${v.ok}/${v.n}</span></div>`).join('')}`);
+};
+
+/* ---------- Statistiques : maîtrise par notion ---------- */
+const _renderStats=window.renderStats;
+window.renderStats=function(){
+ _renderStats.apply(this,arguments);
+ const area=document.getElementById('statsArea');if(!area)return;
+ const ues=allUEs();const ue=window.__statUE&&ues.includes(window.__statUE)?window.__statUE:ues[0];
+ const rows=ue?notionTable(ue).slice().sort((a,b)=>b.recW-a.recW):[];
+ const hist=[];for(const p of Object.values(progress))for(const h of (p.history||[]))if(h.conf)hist.push(h);
+ const lucky=hist.filter(h=>h.correct&&h.conf==='doute').length,sure=hist.filter(h=>h.conf==='sur'),sureWrong=sure.filter(h=>!h.correct).length;
+ area.insertAdjacentHTML('afterbegin',`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0">🧭 Maîtrise par notion</h3>
+ <select onchange="window.__statUE=this.value;renderStats()">${ues.map(u=>`<option${u===ue?' selected':''}>${esc(u)}</option>`).join('')}</select></div>
+ <div style="overflow:auto;margin-top:8px"><table><thead><tr><th>Notion</th><th>Tombée</th><th>QCM</th><th>Vus</th><th>Réussite</th><th>Maîtrise</th><th></th></tr></thead><tbody>
+ ${rows.map(r=>`<tr><td>${esc(r.name)}${r.gone?` <span class="badge b-warn">plus depuis ${r.last}</span>`:''}</td><td>${r.years}/${r.totalYears}</td><td>${r.pool}</td><td>${pct(r.coverage)} %</td><td>${r.success===null?'—':pct(r.success)+' %'}</td>
+  <td style="min-width:110px"><span class="n17track"><span style="width:${pct(r.mastery)}%"></span></span></td>
+  <td><button class="secondary" onclick="show('review');startNotionSession(${JSON.stringify(r.ue).replace(/"/g,'&quot;')},${JSON.stringify(r.name).replace(/"/g,'&quot;')})">▶️</button></td></tr>`).join('')}
+ </tbody></table></div>
+ ${hist.length?`<p class="small" style="margin-top:8px">Confiance déclarée : <b>${lucky}</b> réponse(s) justes en hésitant (fragiles) · <b>${sureWrong}</b> erreur(s) alors que tu étais sûr${sure.length?` (${Math.round(sureWrong/sure.length*100)} % des réponses « sûr »)`:''} — ce sont les idées fausses à corriger en priorité.</p>`:''}
+ <p class="small">📓 ${openErrors().length} proposition(s) dans le carnet d'erreurs. <button class="secondary" onclick="openCarnet()">Ouvrir</button></p></div>`);
+};
+
+/* ---------- Contrôle : réponses contradictoires entre annales ---------- */
+const _renderControl=window.renderControl;
+window.renderControl=function(){
+ _renderControl.apply(this,arguments);
+ const el=document.getElementById('controlList');if(!el)return;
+ const con=affIndex().all.filter(g=>g.contradictory);
+ el.insertAdjacentHTML('afterbegin',`<div class="card"><h3>⚖️ Affirmations jugées différemment selon les annales (${con.length})</h3>
+ <p class="small">La même proposition est notée vraie dans un corrigé et fausse dans un autre. Soit le contexte de la question change, soit un corrigé a été mal saisi (décalage de lettres, erreur d'OCR). Ces affirmations sont exclues des flashcards tant que ce n'est pas réglé.</p>
+ ${con.length?`<details><summary>Afficher la liste</summary>${con.slice(0,200).map(g=>`<div class="anomaly" style="color:var(--text)"><b>${esc(g.text.slice(0,160))}</b><br>
+   ${g.occ.map(o=>`<button class="secondary" style="margin:3px 3px 0 0" onclick="openQ('${o.qid}')">${esc(o.qid)} (${o.letter}) : ${o.truth?'vraie':'fausse'}</button>`).join('')}</div>`).join('')}</details>`:'<div class="success">Aucune contradiction.</div>'}
+ <div style="margin-top:10px"><button class="secondary" onclick="reclassNotions()">🏷️ Reclasser automatiquement les notions</button> <span class="small">Ne touche pas aux notions choisies à la main.</span></div></div>`);
+};
+
+/* ---------- Banque : filtre et badge de notion ---------- */
+const _initFilters=window.initFilters;
+window.initFilters=function(){
+ _initFilters.apply(this,arguments);
+ const tb=document.querySelector('#bank .toolbar');if(!tb)return;
+ let sel=document.getElementById('filterNotion');
+ if(!sel){document.getElementById('filterUE').insertAdjacentHTML('afterend','<select id="filterNotion"><option value="all">Toutes les notions</option></select>');sel=document.getElementById('filterNotion');
+   sel.onchange=()=>{window.__bankLimit=BANK_PAGE;renderBank()};
+   const fu=document.getElementById('filterUE');const old=fu.onchange;fu.onchange=function(){fillBankNotions();if(old)old.apply(this,arguments)};}
+ fillBankNotions();
+};
+function fillBankNotions(){
+ const sel=document.getElementById('filterNotion');if(!sel)return;const ue=document.getElementById('filterUE')?.value||'all';
+ const cur=sel.value;const list=notionsForUE(ue);
+ sel.innerHTML='<option value="all">Toutes les notions</option>'+list.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+ sel.value=list.includes(cur)?cur:'all';
+}
+const _bankRows=window.bankRows;
+window.bankRows=function(){
+ const rows=_bankRows.apply(this,arguments);const n=document.getElementById('filterNotion')?.value||'all';
+ return n==='all'?rows:rows.filter(q=>notionOf(q)===n);
+};
+const _renderBank=window.renderBank;
+window.renderBank=function(){
+ _renderBank.apply(this,arguments);
+ document.querySelectorAll('#bankBody tr').forEach(tr=>{
+   const b=tr.querySelector('button[onclick^="openQ("]');if(!b)return;
+   const id=(b.getAttribute('onclick').match(/openQ\('(.*)'\)/)||[])[1];const q=id&&findRecord(id);const td=tr.children[2];
+   if(q&&td)td.insertAdjacentHTML('beforeend',`<br><span class="badge b-blue">${esc(notionOf(q))}</span>`);
+ });
+};
+
+/* ---------- Fiche QCM : choisir la notion ---------- */
+const _openQ=window.openQ;
+window.openQ=function(id){
+ const r=_openQ.apply(this,arguments);
+ const q=findRecord(id),mc=document.getElementById('modalContent');
+ if(q&&mc){
+   const list=notionsForUE(ueOf(q));if(!list.includes(notionOf(q)))list.push(notionOf(q));
+   mc.insertAdjacentHTML('afterbegin',`<div class="warnbox" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#e8f0fe;border-color:#b7cdf5;color:var(--text)">
+    <b>🏷️ Notion</b><select onchange="setNotion('${q.id}',this.value)" style="flex:1;min-width:220px">
+    ${list.map(n=>`<option value="${esc(n)}"${n===notionOf(q)?' selected':''}>${esc(n)}</option>`).join('')}
+    <option value="__new">➕ Nouvelle notion…</option><option value="__auto">↺ Classement automatique</option></select>
+    <span class="small">${q.notionAuto===false?'choisie à la main':'classée automatiquement'}</span></div>`);
+ }
+ return r;
+};
+
+/* Les QCM importés reçoivent leur notion automatiquement à l'enregistrement. */
+const _persist=window.persist;
+window.persist=function(){for(const q of db.records)if(!q.notion){q.notion=classify(q);q.notionAuto=true}return _persist.apply(this,arguments)};
+
+/* ---------- Démarrage ---------- */
+document.head.insertAdjacentHTML('beforeend','<style>.n17track{display:block;height:12px;background:#eef2f7;border-radius:999px;overflow:hidden}.n17track>span{display:block;height:100%;background:var(--blue)}.bar .fill{display:block}</style>');
+const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v17';
+if(assignNotions(false))persist();
+refreshAll();
+if(document.getElementById('review')?.classList.contains('active'))renderReview();
+})();
+
+</script>
+<script>
+/* Générateur du référentiel : fonction pure, utilisée telle quelle dans l'appli. */
+function buildReferentiel(records,opts){
+ opts=opts||{};
+ const deacc=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+ const norm=s=>deacc(s).replace(/[^a-z0-9]+/g,' ').trim();
+ const STOP=new Set('les des une est sont dans par pour que qui avec sur aux ses leur leurs cette ces plus peut peuvent entre elle ils elles pas concernant propos parmi propositions suivantes indiquez exacte exactes celle celles'.split(' '));
+ const tok=s=>new Set(norm(s).split(' ').filter(w=>w.length>2&&!STOP.has(w)));
+ const yN=y=>parseInt(String(y||'').slice(0,4))||0;
+ const letters=q=>Object.keys(q.choices||{}).filter(k=>String(q.choices[k]||'').trim());
+ const usable=q=>Array.isArray(q.answer)&&q.answer.length&&!q.noAnswer&&['validated','validated_auto','validated_human'].includes(q.correctionStatus);
+ const CTX=/fleche|schema|figure|microphoto|structure (marquee|reperee|indiquee)|element (marque|represente)|zone marquee|ci dessus|ci dessous|aucune des|toutes les propositions|tableau|courbe|photo|etoile/;
+ const OTHER='Autres / non classé';
+ const notionOf=q=>q.notion||OTHER;
+ const out=[];const byUE={};
+ for(const q of records)(byUE[q.ue||'—']=byUE[q.ue||'—']||[]).push(q);
+ for(const ue of Object.keys(byUE).sort()){
+  const L=byUE[ue];
+  const years=[...new Set(L.map(q=>yN(q.year)).filter(Boolean))].sort();
+  const maxY=Math.max(0,...years);const w=y=>Math.pow(0.5,(maxY-y)/4);
+  const wTot=years.reduce((s,y)=>s+w(y),0)||1;
+  // Affirmations qui reviennent d'une année à l'autre
+  const aff={};
+  for(const q of L)for(const t of Object.values(q.choices||{})){const n=norm(t);if(n.length<25||CTX.test(n))continue;(aff[n]=aff[n]||new Set()).add(q.year)}
+  const affRec=q=>Object.values(q.choices||{}).filter(t=>{const s=aff[norm(t)];return s&&s.size>1}).length;
+  // Regroupement des QCM quasi identiques (même question reprise)
+  const tk=L.map(q=>tok(q.question+' '+Object.values(q.choices||{}).join(' ')));
+  const par=L.map((_,i)=>i);const f=i=>{while(par[i]!==i)i=par[i]=par[par[i]];return i};
+  const inv={};tk.forEach((s,i)=>s.forEach(x=>(inv[x]=inv[x]||[]).push(i)));
+  for(let i=0;i<L.length;i++){const c={};for(const x of tk[i])for(const j of inv[x])if(j>i)c[j]=(c[j]||0)+1;
+   for(const j in c){const inter=c[j],J=inter/(tk[i].size+tk[j].size-inter);if(J>=0.55)par[f(i)]=f(+j)}}
+  const groups={};L.forEach((q,i)=>(groups[f(i)]=groups[f(i)]||[]).push(q));
+  // Poids des notions (récurrence pondérée par l'ancienneté)
+  const nt={};
+  for(const q of L){const n=notionOf(q);(nt[n]=nt[n]||{ys:new Set()}).ys.add(yN(q.year))}
+  for(const n in nt){const ys=[...nt[n].ys].filter(Boolean).sort();const sw=ys.reduce((s,y)=>s+w(y),0);const last=ys[ys.length-1]||0;
+   nt[n]=Object.assign(nt[n],{years:ys.length,recW:sw/wTot,recS:(sw+1)/(wTot+2),last,gone:years.filter(y=>y>last).length>=3})}
+  // Dans chaque groupe : les copies quasi identiques (même corrigé) sont fusionnées,
+  // les variantes (autres valeurs, autre corrigé) restent des QCM distincts.
+  const reps=[];
+  const ans=q=>(q.answer||[]).slice().sort().join('');
+  const idx=new Map(L.map((q,i)=>[q,i]));
+  const jac=(a,b)=>{let inter=0;for(const x of a)if(b.has(x))inter++;return inter/(a.size+b.size-inter)};
+  for(const g of Object.values(groups)){
+   const gy=[...new Set(g.map(q=>q.year))].sort();
+   const ar=Math.max(...g.map(affRec));
+   const ok=g.filter(usable).sort((a,b)=>yN(b.year)-yN(a.year)||affRec(b)-affRec(a));
+   const kept=[];
+   for(const q of ok){const dup=kept.find(k=>ans(k.q)===ans(q)&&jac(tk[idx.get(k.q)],tk[idx.get(q)])>=0.85);
+    if(dup)dup.copies.push(q.year);else kept.push({q,copies:[q.year]})}
+   for(const k of kept){
+    const rep=k.q;const n=nt[notionOf(rep)];
+    let score=2*(gy.length-1)+0.6*ar+3*n.recS+w(yN(rep.year))+(k.copies.length>1?1:0);
+    if(n.gone)score*=0.4;
+    reps.push({q:rep,id:rep.id,notion:notionOf(rep),years:gy,copies:[...new Set(k.copies)],ar,score,gone:n.gone,
+      core:!n.gone&&(gy.length>=2||ar>=2||n.recW>=0.5)});
+   }
+  }
+  reps.sort((a,b)=>b.score-a.score||String(a.id).localeCompare(String(b.id)));
+  const chunk=(arr,size)=>{if(!arr.length)return [];const k=Math.ceil(arr.length/size),s=Math.ceil(arr.length/k);const r=[];for(let i=0;i<arr.length;i+=s)r.push(arr.slice(i,i+s));return r};
+  const core=reps.filter(r=>r.core);
+  const push=(type,title,list,meta)=>out.push({id:ue+'|'+type+'|'+title,ue,type,title,qids:list.map(r=>r.id),
+     meta:Object.assign({recurrent:list.filter(r=>r.years.length>=2).length},meta||{})});
+  // 1. Séries par notion (apprendre)
+  const byN={};core.forEach(r=>(byN[r.notion]=byN[r.notion]||[]).push(r));
+  Object.entries(byN).sort((a,b)=>nt[b[0]].recW-nt[a[0]].recW||a[0].localeCompare(b[0],'fr')).forEach(([n,l])=>{
+   const parts=chunk(l,15);
+   parts.forEach((p,i)=>push('notion',parts.length>1?`${n} — ${i+1}/${parts.length}`:n,p,{notion:n,years:nt[n].years,totalYears:years.length}));
+  });
+  // 2. Incontournables (consolider) : QCM repris ou très riches en affirmations récurrentes
+  const top=core.filter(r=>r.years.length>=2||r.ar>=3);
+  chunk(top,20).forEach((p,i,a)=>push('top',`Incontournables ${i+1}/${a.length}`,p));
+  // 3. Examens blancs (s'entraîner) : taille réelle, notions au prorata de leur fréquence
+  const sizes={};L.forEach(q=>sizes[q.source]=(sizes[q.source]||0)+1);
+  const recentSrc=[...new Set(L.slice().sort((a,b)=>yN(b.year)-yN(a.year)).map(q=>q.source))].slice(0,4).map(s=>sizes[s]).sort((a,b)=>a-b);
+  const N=Math.max(10,recentSrc[Math.floor(recentSrc.length/2)]||20);
+  const nEx=Math.min(opts.maxExams||5,Math.floor(core.length/N));
+  if(nEx>=1){
+   const names=Object.keys(byN);
+   const W=names.reduce((s,n)=>s+nt[n].recW,0)||1;
+   // quota par examen et par notion, puis distribution « en donne » pour des examens équilibrés
+   const q0=names.map(n=>({n,x:N*nt[n].recW/W,max:Math.floor(byN[n].length/nEx)}));
+   q0.forEach(a=>a.k=Math.min(a.max,Math.floor(a.x)));
+   let rest=N-q0.reduce((s,a)=>s+a.k,0);
+   q0.sort((a,b)=>(b.x-Math.floor(b.x))-(a.x-Math.floor(a.x)));
+   let guard=0;while(rest>0&&guard++<50)for(const a of q0)if(rest>0&&a.k<a.max){a.k++;rest--}
+   const exs=Array.from({length:nEx},()=>[]);
+   for(const a of q0){const l=byN[a.n];for(let j=0;j<a.k*nEx;j++)exs[j%nEx].push(l[j])}
+   exs.forEach((pick,e)=>{
+    if(pick.length<N*0.8)return;
+    const lanes={};pick.forEach(r=>(lanes[r.notion]=lanes[r.notion]||[]).push(r));
+    const ord=[];const ls=Object.values(lanes);while(ls.some(l=>l.length))for(const l of ls)if(l.length)ord.push(l.shift());
+    push('exam',`Examen blanc ${e+1}`,ord,{size:N});
+   });
+  }
+  // 4. Compléments : QCM restants (notions rares ou qui ne tombent plus)
+  const extra=reps.filter(r=>!r.core);
+  chunk(extra,20).forEach((p,i,a)=>push('extra',`Compléments ${i+1}/${a.length}`,p));
+  out.push({id:ue+'|stats',ue,type:'stats',title:'stats',qids:[],meta:{total:L.length,usable:L.filter(usable).length,reps:reps.length,core:core.length,top:top.length,extra:extra.length,dup:L.filter(usable).length-reps.length,variants:reps.filter(r=>r.years.length>1).length,years:years.length,examSize:N}});
+ }
+ return out;
+}
+
+
+/* =========================================================================
+   QCM Médecine — v18 : référentiel de séries par UE
+   (apprendre par notion → consolider les incontournables → examens blancs)
+   ========================================================================= */
+(function(){
+'use strict';
+const LS_REF='qcmMedReferentiel';
+function loadRef(){try{return JSON.parse(localStorage.getItem(LS_REF)||'null')}catch(e){return null}}
+function saveRef(r){try{localStorage.setItem(LS_REF,JSON.stringify(r))}catch(e){console.warn('Référentiel non enregistré',e)}}
+function ensureRef(force){
+ let r=loadRef();
+ if(force||!r||!Array.isArray(r.series)){r={generatedAt:Date.now(),nRecords:db.records.length,series:buildReferentiel(db.records)};saveRef(r)}
+ return r;
+}
+window.regenRef=function(){
+ if(!confirm('Régénérer le référentiel à partir de la banque actuelle ?\n\nLes séries peuvent changer de contenu. Ta progression sur chaque QCM est conservée.'))return;
+ ensureRef(true);renderRef();
+};
+const TYPES={notion:['1','📗 Apprendre par notion','Une série par notion, les QCM les plus rentables en premier. Fais-les en mode révision, avec correction après chaque QCM.'],
+ top:['2','⭐ Consolider les incontournables','Les QCM déjà repris d\'une année sur l\'autre, ou dont plusieurs propositions reviennent. À revoir jusqu\'à ne plus faire d\'erreur.'],
+ exam:['3','🏁 Examens blancs','Même nombre de QCM qu\'à l\'examen, notions au prorata de leur fréquence, aucune question commune entre deux examens. À passer chronométré.'],
+ extra:['+','📦 Compléments','Notions rares ou qui ne tombent plus depuis au moins 3 ans. À garder pour la fin, après vérification de ton programme.']};
+function seriesStats(s){
+ const qs=s.qids.map(findRecord).filter(Boolean);
+ let done=0,ok=0;
+ for(const q of qs){const h=(progress[q.id]||{}).history||[];if(h.length){done++;if(h[h.length-1].correct)ok++}}
+ const n=qs.length;
+ return {n,done,ok,succ:done?ok/done:0,mastered:n>0&&done===n&&ok/n>=0.8};
+}
+function examLabel(s){return `Référentiel · ${s.ue} · ${s.title}`}
+window.refStart=function(key,asExam){
+ const s=ensureRef().series.find(x=>x.id===key);if(!s)return;
+ const ids=s.qids.filter(id=>findRecord(id));
+ if(!ids.length){alert('Aucun QCM de cette série n\'est encore dans la banque. Régénère le référentiel.');return}
+ if(asExam){
+   if(loadExamState()&&!confirm('Une épreuve est déjà en cours. La remplacer ?'))return;
+   const limit=Math.round(ids.length*(s.ue.match(/math|physique|1\.4|1\.6/i)?3:1.8)/5)*5;
+   session={exam:true,source:examLabel(s),queue:ids,idx:0,answers:{},flags:new Set(),startedAt:Date.now(),limitMin:limit,withSchedule:true,finished:false,results:[]};
+   saveExamState();startExamTimer();
+ }else session={queue:ids,idx:0,sel:new Set(),revealed:false,results:[],startedAt:Date.now(),deferred:0};
+ show('review');
+};
+window.refPrint=function(key){
+ const s=ensureRef().series.find(x=>x.id===key);if(!s)return;
+ const qs=s.qids.map(findRecord).filter(Boolean);
+ const body=qs.map((q,i)=>`<div class="q"><h3>${i+1}. ${esc(q.question)}</h3><ol type="A">${optLetters(q).map(l=>`<li>${esc(q.choices[l]||'')}</li>`).join('')}</ol>
+   <p class="meta">${esc(q.id)} · ${esc(q.notion||'')}</p><p class="ans">Réponse : <b>${normalizeAnswer(q.answer).join('')}</b></p></div>`).join('');
+ const w=window.open('','_blank');if(!w){alert('Autorise les fenêtres surgissantes pour imprimer.');return}
+ w.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${esc(s.ue+' — '+s.title)}</title><style>
+ body{font:14px/1.45 Georgia,serif;max-width:760px;margin:24px auto;padding:0 16px;color:#111}h1{font-size:20px}h3{font-size:15px;margin:0 0 6px}
+ .q{break-inside:avoid;border-bottom:1px solid #ddd;padding:10px 0}.meta{color:#666;font-size:12px;margin:4px 0}ol{margin:4px 0 4px 22px}
+ .ans{margin:4px 0}body.hide .ans{visibility:hidden}.bar{display:flex;gap:8px;margin-bottom:12px}@media print{.bar{display:none}}</style></head>
+ <body><div class="bar"><button onclick="document.body.classList.toggle('hide')">Masquer / afficher les réponses</button><button onclick="print()">Imprimer</button></div>
+ <h1>${esc(s.ue)} — ${esc(s.title)}</h1><p class="meta">${qs.length} QCM · référentiel généré le ${new Date(ensureRef().generatedAt).toLocaleDateString('fr-FR')}</p>${body}</body></html>`);
+ w.document.close();
+};
+window.__refUE=window.__refUE||null;
+function renderRef(){
+ const area=document.getElementById('refArea');if(!area)return;
+ const ref=ensureRef();
+ const ues=[...new Set(ref.series.map(s=>s.ue))].sort();
+ if(!ues.length){area.innerHTML='<div class="card">La banque est vide : importe des annales pour générer le référentiel.</div>';return}
+ const ue=ues.includes(window.__refUE)?window.__refUE:ues[0];
+ const list=ref.series.filter(s=>s.ue===ue&&s.type!=='stats');
+ const st=(ref.series.find(s=>s.ue===ue&&s.type==='stats')||{}).meta||{};
+ const next=['notion','top','exam'].flatMap(t=>list.filter(s=>s.type===t)).find(s=>!seriesStats(s).mastered);
+ const stale=db.records.length!==ref.nRecords;
+ const row=s=>{const x=seriesStats(s);const last=s.type==='exam'?exams.filter(e=>e.source===examLabel(s)).slice(-1)[0]:null;
+   return `<div class="bar" style="flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line)">
+   <span style="flex:1 1 280px"><b>${esc(s.title)}</b>${x.mastered?' <span class="badge b-ok">maîtrisée</span>':''}<br>
+   <span class="small">${x.n} QCM${s.meta.recurrent?` · ${s.meta.recurrent} repris d'une année à l'autre`:''}${s.meta.years?` · notion tombée ${s.meta.years}/${s.meta.totalYears} années`:''} · faits ${x.done}/${x.n}${x.done?` · ${Math.round(x.succ*100)} % justes à la dernière tentative`:''}${last?` · dernier passage ${last.score}/${last.n}${last.note20!=null?` (${last.note20}/20)`:''}`:''}</span></span>
+   <span class="n17track" style="flex:0 0 110px"><span style="width:${x.n?Math.round(x.done/x.n*100):0}%"></span></span>
+   <button class="${s.type==='exam'?'secondary':'primary'}" onclick="refStart(${JSON.stringify(s.id).replace(/"/g,'&quot;')},false)">▶️ Réviser</button>
+   ${s.type==='exam'?`<button class="primary" onclick="refStart(${JSON.stringify(s.id).replace(/"/g,'&quot;')},true)">🏁 Passer l'examen</button>`:''}
+   <button class="secondary" title="Version imprimable" onclick="refPrint(${JSON.stringify(s.id).replace(/"/g,'&quot;')})">🖨️</button></div>`};
+ area.innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+  <select onchange="window.__refUE=this.value;renderRef()">${ues.map(u=>`<option${u===ue?' selected':''}>${esc(u)}</option>`).join('')}</select>
+  <span class="small">Généré le ${fmtDate(ref.generatedAt)} <button class="secondary" onclick="regenRef()">↻ Régénérer</button></span></div>
+  ${stale?`<div class="warnbox" style="margin-top:10px">La banque a changé depuis la génération (${ref.nRecords} → ${db.records.length} QCM). Régénère le référentiel pour intégrer les nouveaux QCM.</div>`:''}
+  <p class="small" style="margin-top:10px">${st.usable||0} QCM corrigés sur ${st.total||0}, soit ${st.reps||0} QCM distincts une fois les copies d'une année sur l'autre fusionnées (${st.dup||0} copies). Le référentiel retient les <b>${st.core||0}</b> QCM des notions qui tombent régulièrement, dont <b>${st.top||0}</b> incontournables. Taille d'un examen : ${st.examSize||'?'} QCM.</p>
+  ${next?`<div class="success" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span>Prochaine étape : <b>${esc(next.title)}</b></span>
+   <button class="ok" onclick="refStart(${JSON.stringify(next.id).replace(/"/g,'&quot;')},${next.type==='exam'})">▶️ Continuer</button></div>`:'<div class="success">Tout le parcours de cette UE est maîtrisé. Repasse les examens blancs pour entretenir.</div>'}
+ </div>
+ ${['notion','top','exam','extra'].map(t=>{const l=list.filter(s=>s.type===t);if(!l.length)return '';const [num,title,desc]=TYPES[t];
+   const done=l.filter(s=>seriesStats(s).mastered).length;
+   return `<div class="card"><h3>${title} <span class="small">${done}/${l.length} série(s) maîtrisée(s)</span></h3><p class="small">${desc}</p>${t==='extra'?`<details><summary>Afficher les ${l.length} série(s)</summary>${l.map(row).join('')}</details>`:l.map(row).join('')}</div>`}).join('')}`;
+}
+window.renderRef=renderRef;
+const _show=window.show;
+window.show=function(id){const r=_show.apply(this,arguments);if(id==='ref')renderRef();return r};
+const _renderHome=window.renderHome;
+window.renderHome=function(){
+ _renderHome.apply(this,arguments);
+ const el=document.getElementById('homeToday');if(!el||!loadRef())return;
+ const ref=ensureRef();const ues=[...new Set(ref.series.map(s=>s.ue))].sort();
+ const steps=ues.map(u=>{const l=ref.series.filter(s=>s.ue===u&&s.type!=='stats'&&s.type!=='extra');const n=['notion','top','exam'].flatMap(t=>l.filter(s=>s.type===t)).find(s=>!seriesStats(s).mastered);
+   const m=l.filter(s=>seriesStats(s).mastered).length;return `<div class="bar"><span class="lab" style="min-width:150px">${esc(u)}</span><span class="n17track" style="flex:1"><span style="width:${l.length?Math.round(m/l.length*100):0}%"></span></span><span class="val" style="min-width:70px">${m}/${l.length}</span>${n?`<button class="secondary" onclick="refStart(${JSON.stringify(n.id).replace(/"/g,'&quot;')},${n.type==='exam'})" title="${esc(n.title)}">▶️</button>`:''}</div>`}).join('');
+ el.insertAdjacentHTML('beforeend',`<h3 style="margin-top:14px">📘 Référentiel : séries maîtrisées par UE</h3>${steps}`);
+};
+const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v18';
+ensureRef();renderHome();
+})();
 
 </script>
 </body></html>
