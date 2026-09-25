@@ -80,7 +80,7 @@ label{display:block;font-size:14px;margin-bottom:8px}
 .kbd{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;background:#f9fafb}
 @media(max-width:600px){main{padding:10px}th,td{padding:6px;font-size:13px}h1{font-size:19px}}
 </style></head><body>
-<header><b>🩺 QCM Médecine <span class="small" style="color:#9ca3af">v18</span></b>
+<header><b>🩺 QCM Médecine <span class="small" style="color:#9ca3af">v18.1</span></b>
 <nav>
 <button data-nav="home" onclick="show('home')">Accueil</button>
 <button data-nav="ref" onclick="show('ref')">📘 Référentiel</button>
@@ -5844,6 +5844,48 @@ window.renderHome=function(){
 };
 const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v18';
 ensureRef();renderHome();
+})();
+
+</script>
+<script>
+/* v18.1 — Sauvegarde sur iPad / iPhone : Safari et les aperçus iOS ignorent souvent
+   les téléchargements lancés par script. On propose le partage iOS (« Enregistrer
+   dans Fichiers ») depuis un bouton, ce qui fournit le geste utilisateur exigé. */
+(function(){
+'use strict';
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+let pending=null;
+function offer(name,blob){
+ pending={name,blob,file:new File([blob],name,{type:blob.type||'application/json'})};
+ const mb=(blob.size/1048576).toFixed(1);
+ const canShare=!!(navigator.canShare&&navigator.canShare({files:[pending.file]}));
+ document.getElementById('modalContent').innerHTML=`<h2 style="margin-top:0">💾 Enregistrer la sauvegarde</h2>
+ <p><b>${esc(name)}</b> · ${mb} Mo</p>
+ ${canShare?`<button class="primary" style="width:100%;margin:6px 0" onclick="iosShareSave()">📤 Enregistrer dans Fichiers (ou envoyer)</button>
+ <p class="small">Dans la feuille de partage, choisis <b>Enregistrer dans Fichiers</b>, puis un dossier (par exemple iCloud Drive), et touche <b>Enregistrer</b>.</p>`:''}
+ <button class="${canShare?'secondary':'primary'}" style="width:100%;margin:6px 0" onclick="iosOpenSave()">⬇️ Télécharger / ouvrir le fichier</button>
+ <p class="small">Si rien ne se passe, l'application est sans doute ouverte dans un aperçu (application Fichiers, pièce jointe…). Ouvre-la dans Safari pour pouvoir enregistrer.</p>
+ <div id="iosSaveMsg" class="small"></div>
+ <button class="secondary" style="margin-top:8px" onclick="closeModal()">Fermer</button>`;
+ document.getElementById('modal').classList.add('show');
+}
+window.iosShareSave=async function(){
+ const m=document.getElementById('iosSaveMsg');
+ try{await navigator.share({files:[pending.file],title:pending.name});if(m)m.innerHTML='<span class="badge b-ok">Partage terminé</span> Vérifie que le fichier apparaît bien dans Fichiers.'}
+ catch(e){if(m)m.innerHTML=e&&e.name==='AbortError'?'Partage annulé.':`<span class="badge b-danger">Échec du partage</span> ${esc(e&&e.message||String(e))}. Essaie « Télécharger ».`}
+};
+window.iosOpenSave=function(){
+ const url=URL.createObjectURL(pending.blob);
+ const a=document.createElement('a');a.href=url;a.download=pending.name;a.target='_blank';document.body.appendChild(a);a.click();
+ setTimeout(()=>{URL.revokeObjectURL(url);a.remove()},60000);
+ const m=document.getElementById('iosSaveMsg');if(m)m.innerHTML='Si Safari demande « Télécharger », accepte : le fichier va dans <b>Fichiers › Téléchargements</b>.';
+};
+if(isIOS){
+ const _dp=window.downloadParts,_d=window.download;
+ window.downloadParts=function(name,parts){try{offer(name,new Blob(parts,{type:'application/json'}))}catch(e){_dp.apply(this,arguments)}};
+ window.download=function(name,content,type){try{offer(name,new Blob([content],{type:type||'application/json'}))}catch(e){_d.apply(this,arguments)}};
+}
+const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v18.1';
 })();
 
 </script>
