@@ -80,7 +80,7 @@ label{display:block;font-size:14px;margin-bottom:8px}
 .kbd{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;background:#f9fafb}
 @media(max-width:600px){main{padding:10px}th,td{padding:6px;font-size:13px}h1{font-size:19px}}
 </style></head><body>
-<header><b>🩺 QCM Médecine <span class="small" style="color:#9ca3af">v18.7</span></b>
+<header><b>🩺 QCM Médecine <span class="small" style="color:#9ca3af">v18.9</span></b>
 <nav>
 <button data-nav="home" onclick="show('home')">Accueil</button>
 <button data-nav="ref" onclick="show('ref')">📘 Référentiel</button>
@@ -360,17 +360,69 @@ let db=loadDB();
 let progress=loadProgress();
 let storageOK=true;
 
+/* v18.8 — La banque est enregistrée dans IndexedDB (quota de plusieurs Go) en plus de
+   localStorage (limité à ~5 Mo sur Safari/iPad). Si localStorage est plein, la banque n'y est
+   plus écrite : IndexedDB fait foi. */
+const LS_BANK_IN_IDB='qcmMedBankInIDB', LS_SAVED_AT='qcmMedSavedAt';
+const BankStore={
+ dbp:null,
+ open(){if(this.dbp)return this.dbp;this.dbp=new Promise((res,rej)=>{
+   if(typeof indexedDB==='undefined')return rej(new Error('IndexedDB indisponible'));
+   const r=indexedDB.open('qcmMedBank',1);
+   r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains('kv'))d.createObjectStore('kv')};
+   r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error||new Error('Ouverture IndexedDB impossible'))});return this.dbp},
+ async get(k){const d=await this.open();return new Promise((res,rej)=>{const r=d.transaction('kv','readonly').objectStore('kv').get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})},
+ async put(k,v){const d=await this.open();return new Promise((res,rej)=>{const t=d.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=()=>res(true);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error||new Error('Écriture annulée'))})}
+};
+let bankReady=false,bankTimer=null,idbOK=true,lsOK=true;
+let _bankReadyResolve;window.bankReadyPromise=new Promise(r=>_bankReadyResolve=r);
+function lsBankOff(){try{return localStorage.getItem(LS_BANK_IN_IDB)==='1'}catch(e){return false}}
+async function writeBankIDB(){
+ bankTimer=null;
+ const savedAt=Date.now();
+ try{await BankStore.put('bank',{savedAt,db:{version:3,records:db.records,annexes:db.annexes||[],notationMigr:db.notationMigr},progress});idbOK=true}
+ catch(e){idbOK=false;console.warn('IndexedDB : écriture impossible',e)}
+ refreshStorageWarning();
+}
+function flushBank(){if(bankTimer){clearTimeout(bankTimer);writeBankIDB()}}
+if(typeof window!=='undefined'){window.addEventListener('pagehide',flushBank);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flushBank()})}
+function refreshStorageWarning(){
+ if(idbOK||lsOK){storageOK=true;setStorageWarning('')}
+ else{storageOK=false;setStorageWarning('⚠️ <b>Le navigateur refuse d\'enregistrer la banque</b>. Vos modifications ne sont conservées que jusqu\'à la fermeture de l\'application. Exportez immédiatement une sauvegarde depuis l\'onglet 💾.')}
+}
 function persist(){
  invalidateRecurrence();
+ if(!bankReady)return;            // rien n'est écrit avant d'avoir relu la banque d'IndexedDB
+ if(bankTimer)clearTimeout(bankTimer);
+ bankTimer=setTimeout(writeBankIDB,300);
+ const now=Date.now();
  try{
-   localStorage.setItem(LS_DB,JSON.stringify({version:3,records:db.records,annexes:db.annexes||[]}));
+   if(!lsBankOff())localStorage.setItem(LS_DB,JSON.stringify({version:3,records:db.records,annexes:db.annexes||[],savedAt:now}));
    localStorage.setItem(LS_PROG,JSON.stringify(progress));
-   storageOK=true;setStorageWarning('');
+   localStorage.setItem(LS_SAVED_AT,String(now));
+   lsOK=!lsBankOff();
  }catch(e){
-   storageOK=false;
-   console.warn('Sauvegarde impossible',e);
-   setStorageWarning('⚠️ <b>Le navigateur refuse d\'enregistrer la banque</b> (stockage saturé). Vos modifications ne sont conservées que jusqu\'à la fermeture de l\'onglet. Exportez immédiatement une sauvegarde depuis l\'onglet 💾.');
+   // localStorage plein : la banque passe entièrement dans IndexedDB et libère la place.
+   console.warn('localStorage plein, bascule vers IndexedDB',e);
+   try{localStorage.removeItem(LS_DB);localStorage.setItem(LS_BANK_IN_IDB,'1')}catch(e2){}
+   try{localStorage.setItem(LS_PROG,JSON.stringify(progress));localStorage.setItem(LS_SAVED_AT,String(now))}catch(e3){}
+   lsOK=false;
  }
+ refreshStorageWarning();
+}
+async function loadBankFromIDB(){
+ try{
+   const rec=await BankStore.get('bank');
+   let lsAt=0;try{lsAt=Number(localStorage.getItem(LS_SAVED_AT)||0)}catch(e){}
+   const lsHasBank=(()=>{try{return !!localStorage.getItem(LS_DB)}catch(e){return false}})();
+   if(rec&&rec.db&&Array.isArray(rec.db.records)&&(lsBankOff()||!lsHasBank||(rec.savedAt||0)>=lsAt)){
+     db={version:3,records:rec.db.records,annexes:Array.isArray(rec.db.annexes)?rec.db.annexes:[],notationMigr:rec.db.notationMigr};
+     if(rec.progress&&typeof rec.progress==='object')progress=rec.progress;
+   }
+ }catch(e){idbOK=false;console.warn('IndexedDB : lecture impossible',e)}
+ try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
+ bankReady=true;_bankReadyResolve();
+ persist();                       // première copie dans IndexedDB (et libération de localStorage si besoin)
 }
 function setStorageWarning(html){
  const el=document.getElementById('storageWarning');if(!el)return;
@@ -4958,6 +5010,7 @@ function migrateStatuses(){
  return changed;
 }
 async function boot(){
+ await loadBankFromIDB();
  loadExams();
  if(typeof migrerBanqueNotation==='function')migrerBanqueNotation();
  initFilters();updateStats();renderBank();renderControl();renderHome();
@@ -5639,8 +5692,7 @@ window.persist=function(){for(const q of db.records)if(!q.notion){q.notion=class
 /* ---------- Démarrage ---------- */
 document.head.insertAdjacentHTML('beforeend','<style>.n17track{display:block;height:12px;background:#eef2f7;border-radius:999px;overflow:hidden}.n17track>span{display:block;height:100%;background:var(--blue)}.bar .fill{display:block}</style>');
 const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v17';
-if(assignNotions(false))persist();
-refreshAll();
+window.bankReadyPromise.then(()=>{if(assignNotions(false))persist();refreshAll()});
 if(document.getElementById('review')?.classList.contains('active'))renderReview();
 })();
 
@@ -5870,7 +5922,7 @@ window.renderHome=function(){
  el.insertAdjacentHTML('beforeend',`<h3 style="margin-top:14px">📘 Référentiel : séries maîtrisées par UE</h3>${steps}`);
 };
 const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v18';
-ensureRef();renderHome();
+window.bankReadyPromise.then(()=>{ensureRef();renderHome()});
 })();
 
 </script>
@@ -6232,8 +6284,114 @@ function autoScan(reason){
 const _acc=window.acceptImport;
 window.acceptImport=async function(){const r=await _acc.apply(this,arguments);try{GR=null;autoScan('dans l\'annale importée')}catch(e){console.warn(e)}return r};
 
-const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v18.7';
-badge();setTimeout(()=>{try{autoScan('depuis le dernier balayage')}catch(e){console.warn(e)}},800);
+const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v18.8b';
+badge();window.bankReadyPromise.then(()=>setTimeout(()=>{try{GR=null;autoScan('depuis le dernier balayage')}catch(e){console.warn(e)}},1500));
+})();
+
+</script>
+<script>
+/* v18.9 — Sauvegardes complète et intégrale : construites morceau par morceau (Blobs),
+   découpées en plusieurs fichiers sur iPad/iPhone, avec progression et enregistrement
+   par la feuille de partage. */
+(function(){
+'use strict';
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const LIMIT=isIOS?120*1048576:1500*1048576;   // taille maximale d'un fichier
+const tick=()=>new Promise(r=>setTimeout(r,0));
+const mo=n=>(n/1048576).toFixed(n<10485760?1:0)+' Mo';
+let files=[];
+function modal(html){document.getElementById('modalContent').innerHTML=html;document.getElementById('modal').classList.add('show')}
+function progressUI(label,done,total){
+ const el=document.getElementById('bkProg');
+ if(!el){modal(`<h2 style="margin-top:0">💾 Préparation de la sauvegarde</h2><p id="bkLab" class="small"></p><div class="n17track"><span id="bkProg" style="width:0%"></span></div><p class="small">Ne ferme pas l'application pendant la préparation.</p>`)}
+ const l=document.getElementById('bkLab'),p=document.getElementById('bkProg');
+ if(l)l.textContent=label;if(p)p.style.width=(total?Math.round(done/total*100):0)+'%';
+}
+window.exportBackup=async function(withAssets,withPdfs){
+ const kind=withPdfs?'intégrale':(withAssets?'complète':'légère');
+ const stamp=new Date().toISOString().slice(0,10);
+ const base=`qcm-medecine-sauvegarde-${stamp}${withPdfs?'-integrale':(withAssets?'':'-legere')}`;
+ try{
+  if(typeof flushBank==='function')flushBank();
+  progressUI('Banque et progression…',0,1);await tick();
+  const header=new Blob([JSON.stringify({app:'qcm-medecine',version:16,format:'ndjson-1',exportedAt:new Date().toISOString(),
+    withAssets:!!withAssets,withPdfs:!!withPdfs,records:db.records,progress,exams:(typeof exams!=='undefined'?exams:[]),annexes:db.annexes||[]})+'\n']);
+  // Liste des éléments lourds à ajouter
+  const jobs=[];
+  if(withAssets){
+   for(const src of Object.keys(RUNTIME_PAGE_ASSETS||{}))jobs.push(['page',src,()=>RUNTIME_PAGE_ASSETS[src]]);
+   for(const [t,map] of [['explain',RUNTIME_EXPLAIN],['figure',RUNTIME_FIGURE],['annexeImg',RUNTIME_ANNEXE]])
+     for(const k of Object.keys(map||{}))jobs.push([t,k,()=>map[k]]);
+  }
+  if(withPdfs)for(const k of Object.keys(RUNTIME_PDFS||{}))jobs.push(['pdf',k,null]);
+  const chunks=[[header]];let size=header.size,pdfOk=0,skipped=0;
+  for(let i=0;i<jobs.length;i++){
+   const [t,k,get]=jobs[i];
+   progressUI(`${t==='pdf'?'PDF':'Images'} : ${i+1} / ${jobs.length}`,i,jobs.length);
+   if(i%4===0)await tick();
+   let line=null;
+   try{
+    if(t==='pdf'){
+     let b=RUNTIME_PDFS[k];const ok=x=>x&&typeof x.arrayBuffer==='function';
+     if(!ok(b)){if(b&&b.data)b=new Blob([b.data],{type:'application/pdf'});else if(typeof b==='string')b=new Blob([b64Bytes(b)],{type:'application/pdf'});else{const alt=await pdfBlobFor(k);if(ok(alt))b=alt}}
+     if(!ok(b)){skipped++;continue}
+     line=new Blob([JSON.stringify({t:'pdf',k,v:await blobToBase64(b)})+'\n']);pdfOk++;
+    }else{
+     const v=get();if(v==null)continue;
+     line=new Blob([JSON.stringify({t,k,v:Array.isArray(v)||typeof v==='object'?v:String(v)})+'\n']);
+    }
+   }catch(e){skipped++;console.warn('Élément non exporté',t,k,e);continue}
+   if(size+line.size>LIMIT&&chunks[chunks.length-1].length>1){chunks.push([header]);size=header.size}
+   chunks[chunks.length-1].push(line);size+=line.size;
+  }
+  const n=chunks.length;
+  files=chunks.map((c,i)=>new File(c,n>1?`${base}-partie-${i+1}-sur-${n}.json`:`${base}.json`,{type:'application/json'}));
+  const total=files.reduce((s,f)=>s+f.size,0);
+  const canShareAll=isIOS&&navigator.canShare&&(()=>{try{return navigator.canShare({files})}catch(e){return false}})();
+  const canPick=typeof window.showSaveFilePicker==='function';
+  modal(`<h2 style="margin-top:0">💾 Sauvegarde ${kind} prête</h2>
+   <p>${n>1?`<b>${n} fichiers</b>`:'1 fichier'} · ${mo(total)}${withPdfs?` · ${pdfOk} PDF`:''}${skipped?` · <span class="badge b-warn">${skipped} élément(s) illisible(s) ignoré(s)</span>`:''}</p>
+   ${n>1?`<p class="small">Elle est découpée en ${n} parties pour que l'iPad puisse l'enregistrer. <b>Garde toutes les parties ensemble</b> : pour restaurer, sélectionne-les toutes d'un coup dans 💾 › Restaurer.</p>`:''}
+   ${canShareAll?`<button class="primary" style="width:100%;margin:6px 0" onclick="bkShare(-1)">📤 Enregistrer ${n>1?`les ${n} fichiers`:'le fichier'} dans Fichiers</button>`:''}
+   <div style="display:grid;gap:6px;margin-top:6px">${files.map((f,i)=>`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="small" style="flex:1 1 200px">${esc(f.name)} · ${mo(f.size)}</span>
+     ${isIOS&&navigator.canShare?`<button class="secondary" onclick="bkShare(${i})">📤 Partager</button>`:''}
+     ${canPick?`<button class="secondary" onclick="bkPick(${i})">📁 Enregistrer sous…</button>`:''}
+     <button class="secondary" onclick="bkDownload(${i})">⬇️ Télécharger</button></div>`).join('')}</div>
+   <div id="bkMsg" class="small" style="margin-top:8px"></div>
+   ${isIOS?`<p class="small">Dans la feuille de partage : <b>Enregistrer dans Fichiers</b>, choisis le dossier (Sur mon iPad, iCloud Drive ou une clé USB), puis <b>Enregistrer</b>. Si le partage de tous les fichiers échoue, enregistre-les un par un.</p>`:''}
+   <button class="secondary" style="margin-top:8px" onclick="closeModal()">Fermer</button>`);
+  const info=document.getElementById('restoreInfo')||document.getElementById('storageInfo');
+  if(info)info.innerHTML=`<span class="badge b-ok">Sauvegarde ${kind} créée</span> ${n} fichier(s), ${mo(total)}.`;
+ }catch(e){
+  modal(`<h2 style="margin-top:0">❌ Échec de la sauvegarde ${kind}</h2><p>${esc(e&&e.message||String(e))}</p>
+   <p class="small">La sauvegarde légère (banque et progression) reste possible : c'est la plus importante. Les images et PDF peuvent être réimportés depuis tes PDF d'origine.</p>
+   <button class="secondary" onclick="closeModal()">Fermer</button>`);
+ }
+};
+window.bkShare=async function(i){
+ const m=document.getElementById('bkMsg');const list=i<0?files:[files[i]];
+ try{await navigator.share({files:list});if(m)m.innerHTML='<span class="badge b-ok">Partage terminé</span> Vérifie dans Fichiers que '+(list.length>1?'tous les fichiers sont':'le fichier est')+' bien présent'+(list.length>1?'s':'')+'.'}
+ catch(e){if(m)m.innerHTML=e&&e.name==='AbortError'?'Partage annulé.':`<span class="badge b-danger">Échec du partage</span> ${esc(e&&e.message||String(e))}${list.length>1?' — essaie fichier par fichier.':''}`}
+};
+window.bkPick=async function(i){
+ const m=document.getElementById('bkMsg');const f=files[i];
+ try{const h=await window.showSaveFilePicker({suggestedName:f.name,types:[{description:'Sauvegarde',accept:{'application/json':['.json']}}]});
+   const w=await h.createWritable();await w.write(f);await w.close();if(m)m.innerHTML=`<span class="badge b-ok">Enregistré</span> ${esc(h.name)}`}
+ catch(e){if(m)m.innerHTML=e&&e.name==='AbortError'?'Enregistrement annulé.':`<span class="badge b-danger">Échec</span> ${esc(e&&e.message||String(e))}`}
+};
+window.bkDownload=function(i){
+ const f=files[i];const url=URL.createObjectURL(f);const a=document.createElement('a');a.href=url;a.download=f.name;a.target='_blank';
+ document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove()},120000);
+ const m=document.getElementById('bkMsg');if(m)m.innerHTML=isIOS?'Si Safari propose « Télécharger », accepte : le fichier va dans Fichiers › Téléchargements.':'Téléchargement lancé.';
+};
+// Restauration : plusieurs fichiers (parties) sélectionnables d'un coup
+const inp=document.getElementById('restoreFile');
+if(inp){inp.multiple=true;inp.onchange=async function(){
+ const list=[...this.files].sort((a,b)=>a.name.localeCompare(b.name,'fr',{numeric:true}));
+ for(let i=0;i<list.length;i++){const info=document.getElementById('restoreInfo');if(info&&list.length>1)info.innerHTML=`Restauration de la partie ${i+1} / ${list.length}…`;await restoreBackup(list[i])}
+ this.value='';
+}}
+const hdr=document.querySelector('header b .small');if(hdr)hdr.textContent='v18.9';
 })();
 
 </script>
